@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #0f1f17;
+  --ink-muted: #3d5348;
+  --cream: #f6f0e4;
+  --surface: #fffdf8;
+  --surface-2: #e8f2e8;
+  --lime: #c8ff4d;
+  --lime-deep: #9edb1f;
+  --clay: #e23b2d;
+  --clay-soft: #ffb1a6;
+  --court: #1a4d3a;
+  --court-deep: #0f2e22;
+  --shadow-hard: 4px 4px 0 #0f1f17;
+}
+
+@theme inline {
+  --color-background: var(--cream);
+  --color-foreground: var(--ink);
+  --font-sans: var(--font-body);
+}
+
+body {
+  background-color: var(--cream);
+  color: var(--ink);
+  background-image:
+    radial-gradient(1200px 800px at 10% -10%, rgba(200, 255, 77, 0.35), transparent 55%),
+    radial-gradient(900px 600px at 100% 0%, rgba(226, 59, 45, 0.12), transparent 50%),
+    linear-gradient(165deg, var(--cream) 0%, #eef6e8 45%, var(--cream) 100%);
+  min-height: 100vh;
+}
+
+.noise-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.court-hero {
+  background:
+    linear-gradient(105deg, transparent 40%, rgba(200, 255, 77, 0.08) 100%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.04) 0px,
+      rgba(255, 255, 255, 0.04) 2px,
+      transparent 2px,
+      transparent 28px
+    ),
+    linear-gradient(180deg, var(--court) 0%, var(--court-deep) 100%);
+  border-bottom: 4px solid var(--ink);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) rotate(-0.5deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0);
+  }
+}
+
+.stagger-in > * {
+  animation: rise-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger-in > * {
+    animation: none;
+  }
+}
+
+::selection {
+  background: var(--lime);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 3px solid var(--clay);
+  outline-offset: 2px;
+}

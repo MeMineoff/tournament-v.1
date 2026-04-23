@@ -1,0 +1,18 @@
+-- Опционально: если сетка плей-офф создаётся «пустой», а в таблице matches только
+-- строки первого раунда (или INSERT падает на втором уровне), частая причина — RLS:
+-- разрешён INSERT, но не SELECT. Тогда insert().select('id') возвращает [] и родительские
+-- id для следующего уровня неизвестны.
+--
+-- Выполните в Supabase SQL Editor только если понимаете последствия для безопасности.
+-- Для продакшена замените USING (true) на свои условия (по group_id, auth.uid() и т.д.).
+--
+-- alter table tournament.matches enable row level security;
+--
+-- drop policy if exists "matches_allow_all_anon" on tournament.matches;
+-- create policy "matches_allow_all_anon" on tournament.matches
+--   for all
+--   to anon, authenticated
+--   using (true)
+--   with check (true);
+
+-- Раскомментируйте блок выше при необходимости. Пустой файл-миграция не меняет схему.

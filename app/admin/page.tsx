@@ -81,6 +81,7 @@ export default function AdminPage() {
   const [players, setPlayers] = useState<Player[]>([])
   const [tournaments, setTournaments] = useState<Tournament[]>([])
   const [loading, setLoading] = useState(true)
+  const [dataLoadError, setDataLoadError] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [newGroupName, setNewGroupName] = useState('')
 
@@ -120,7 +121,8 @@ export default function AdminPage() {
   const loadGroupData = useCallback(async () => {
     if (groupId == null) return
     setLoading(true)
-    const [{ data: p }, { data: tour }] = await Promise.all([
+    setDataLoadError(null)
+    const [rPlayers, rTournaments] = await Promise.all([
       supabase.from('players').select('*').eq('group_id', groupId).order('name'),
       supabase
         .from('tournaments')
@@ -128,14 +130,31 @@ export default function AdminPage() {
         .eq('group_id', groupId)
         .order('scheduled_date', { ascending: false }),
     ])
-    setPlayers((p ?? []) as Player[])
-    setTournaments((tour ?? []) as Tournament[])
+    const err = rPlayers.error ?? rTournaments.error
+    if (err) {
+      setDataLoadError(formatSupabaseError(err))
+      setPlayers([])
+      setTournaments([])
+    } else {
+      setPlayers((rPlayers.data ?? []) as Player[])
+      setTournaments((rTournaments.data ?? []) as Tournament[])
+    }
     setLoading(false)
   }, [groupId])
 
   useEffect(() => {
     void (async () => {
-      const { data: g } = await supabase.from('groups').select('*').order('id')
+      const { data: g, error: gErr } = await supabase
+        .from('groups')
+        .select('*')
+        .order('id')
+      if (gErr) {
+        setDataLoadError(`Кластеры: ${formatSupabaseError(gErr)}`)
+        setGroups([])
+        setGroupId(null)
+        setLoading(false)
+        return
+      }
       const list = (g ?? []) as Group[]
       setGroups(list)
       const sel = parseClusterSelection(list, readClusterCookie())
@@ -143,10 +162,29 @@ export default function AdminPage() {
         setGroupId(null)
         return
       }
-      // В шапке сайта может быть «все кластеры», но пустой groupId в админке
-      // очищал списки — поэтому по умолчанию показываем первый кластер; переключение — «Выбрать».
       if (sel === 'all') {
-        setGroupId(list[0]!.id)
+        // Первый кластер в списке id может быть пустым; главная при «все кластерах»
+        // показывает данные по всем — избегаем «пустой админки».
+        const [{ data: pRows, error: pE }, { data: tRows, error: tE }] =
+          await Promise.all([
+            supabase.from('players').select('group_id'),
+            supabase.from('tournaments').select('group_id'),
+          ])
+        if (pE || tE) {
+          setDataLoadError(
+            `Проверка кластеров: ${formatSupabaseError((pE ?? tE) as Parameters<typeof formatSupabaseError>[0])}`
+          )
+          setGroupId(list[0]!.id)
+        } else {
+          const withData = new Set(
+            [
+              ...(pRows ?? []).map((r) => r.group_id as number),
+              ...(tRows ?? []).map((r) => r.group_id as number),
+            ].filter((id) => id != null)
+          )
+          const firstWithData = list.find((g) => withData.has(g.id))
+          setGroupId((firstWithData ?? list[0]!).id)
+        }
       } else {
         setGroupId(sel)
       }
@@ -459,8 +497,10 @@ export default function AdminPage() {
         <p className="mt-2 text-sm text-[var(--ink-muted)]">
           Схема{' '}
           <code className="rounded bg-[var(--surface-2)] px-1">tournament</code>
-          · сначала открывается первый кластер в списке; смена — кнопка «Выбрать» во
-          вкладке «Кластеры» (и cookie «Кластер» в шапке сайта).
+          · на главной при «все кластеры» в админке по умолчанию берётся{' '}
+          <strong>первый</strong> кластер в списке; если списки пустые, а на сайте данные
+          есть — откройте <strong>«Кластеры»</strong> и нажмите <strong>«Выбрать»</strong> у
+          нужного зала (это совпадает с переключателем кластера в шапке сайта).
         </p>
         {currentGroupName && groupId != null && (
           <p className="mt-3 inline-flex items-center gap-2 rounded-xl border-2 border-[var(--ink)] bg-[var(--lime)]/35 px-3 py-2 text-sm font-bold text-[var(--ink)]">
@@ -488,6 +528,46 @@ export default function AdminPage() {
             )}
           </div>
         )}
+        {dataLoadError && (
+          <div
+            className="mt-3 rounded-xl border-2 border-[var(--clay)] bg-[var(--clay-soft)] px-4 py-3 text-sm font-semibold whitespace-pre-wrap text-[var(--ink)]"
+            role="alert"
+          >
+            <span className="font-black">Не удалось загрузить данные.</span> {dataLoadError}
+            <p className="mt-2 text-xs text-[var(--ink-muted)]">
+              Частая причина: в Supabase для таблиц в схеме <code className="rounded bg-[var(--cream)] px-1">tournament</code> выключен доступ на чтение для роли
+              <code className="rounded bg-[var(--cream)] px-1">anon</code> (см. Table Editor → RLS / политики).
+            </p>
+          </div>
+        )}
+        {!loading &&
+          !dataLoadError &&
+          groupId != null &&
+          players.length === 0 &&
+          tournaments.length === 0 &&
+          groups.length > 1 && (
+            <div className="mt-3 rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)]/90 px-4 py-3 text-sm font-semibold text-[var(--ink)]">
+              <p>
+                <strong>На главной</strong> при режиме «все кластеры» вы видите данные{' '}
+                <strong>из всех залов сразу</strong>. <strong>Здесь в админке</strong> список
+                относится <strong>только к одному кластеру</strong> — сейчас открыт «
+                {currentGroupName}». Если здесь пусто, а на сайте везде куча имён, откройте
+                вкладку <strong>«Кластеры»</strong> и нажмите <strong>«Выбрать»</strong> у того
+                зала, куда вы всё вносили.
+              </p>
+            </div>
+          )}
+        {!loading &&
+          !dataLoadError &&
+          groupId != null &&
+          players.length === 0 &&
+          tournaments.length === 0 &&
+          groups.length === 1 && (
+            <div className="mt-3 rounded-xl border-2 border-dashed border-[var(--ink)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--ink-muted)]">
+              В этой группе пока нет игроков и турниров. Добавьте их ниже или проверьте, что
+              открыли ту же базу, что и на главной.
+            </div>
+          )}
       </header>
 
       {msg && (

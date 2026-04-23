@@ -10,6 +10,7 @@ import type { Group, Player, Tournament } from '@/lib/types'
 import { buildPlayoffBracketSkeleton, tierSizesForBracket } from '@/lib/bracket'
 import { insertBracketInTiers } from '@/lib/bracketInsert'
 import {
+  type ClusterSelection,
   CLUSTER_COOKIE_MAX_AGE,
   CLUSTER_COOKIE_NAME,
   CLUSTER_COOKIE_VALUE_ALL,
@@ -74,6 +75,40 @@ const ADMIN_TABS: { id: AdminTab; label: string; emoji: string }[] = [
   { id: 'matches', label: 'Матчи', emoji: '⚡' },
 ]
 
+/**
+ * Главная при «все кластерах» показывает данные со всех залов; в шапке могла
+ * остаться cookie на пустой кластер — тогда id из cookie не в withData, но играть
+ * нечем: подставляем первый кластер, у которого есть игроки/турниры.
+ */
+function pickGroupIdForAdmin(
+  list: Group[],
+  sel: ClusterSelection,
+  withData: Set<number>
+): { id: number; autoSwitched: boolean; fromName?: string; toName?: string } {
+  if (list.length === 0) {
+    return { id: 0, autoSwitched: false }
+  }
+  const firstWithData = list.find((g) => withData.has(g.id))
+  if (sel === 'all') {
+    return {
+      id: (firstWithData ?? list[0]!).id,
+      autoSwitched: false,
+    }
+  }
+  if (withData.has(sel)) {
+    return { id: sel, autoSwitched: false }
+  }
+  if (withData.size === 0) {
+    return { id: sel, autoSwitched: false }
+  }
+  return {
+    id: firstWithData!.id,
+    autoSwitched: true,
+    fromName: list.find((g) => g.id === sel)?.name,
+    toName: firstWithData!.name,
+  }
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const [groups, setGroups] = useState<Group[]>([])
@@ -82,6 +117,7 @@ export default function AdminPage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([])
   const [loading, setLoading] = useState(true)
   const [dataLoadError, setDataLoadError] = useState<string | null>(null)
+  const [initHint, setInitHint] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [newGroupName, setNewGroupName] = useState('')
 
@@ -162,34 +198,43 @@ export default function AdminPage() {
         setGroupId(null)
         return
       }
-      if (sel === 'all') {
-        // Первый кластер в списке id может быть пустым; главная при «все кластерах»
-        // показывает данные по всем — избегаем «пустой админки».
-        const [{ data: pRows, error: pE }, { data: tRows, error: tE }] =
-          await Promise.all([
-            supabase.from('players').select('group_id'),
-            supabase.from('tournaments').select('group_id'),
-          ])
-        if (pE || tE) {
-          setDataLoadError(
-            `Проверка кластеров: ${formatSupabaseError((pE ?? tE) as Parameters<typeof formatSupabaseError>[0])}`
-          )
-          setGroupId(list[0]!.id)
-        } else {
-          const withData = new Set(
-            [
-              ...(pRows ?? []).map((r) => r.group_id as number),
-              ...(tRows ?? []).map((r) => r.group_id as number),
-            ].filter((id) => id != null)
-          )
-          const firstWithData = list.find((g) => withData.has(g.id))
-          setGroupId((firstWithData ?? list[0]!).id)
-        }
-      } else {
-        setGroupId(sel)
+      setInitHint(null)
+      const [{ data: pRows, error: pE }, { data: tRows, error: tE }] =
+        await Promise.all([
+          supabase.from('players').select('group_id'),
+          supabase.from('tournaments').select('group_id'),
+        ])
+      if (pE || tE) {
+        setDataLoadError(
+          `Проверка кластеров: ${formatSupabaseError((pE ?? tE) as Parameters<typeof formatSupabaseError>[0])}`
+        )
+        setGroupId(list[0]!.id)
+        return
+      }
+      const withData = new Set(
+        [
+          ...(pRows ?? []).map((r) => r.group_id as number),
+          ...(tRows ?? []).map((r) => r.group_id as number),
+        ].filter((id) => id != null)
+      )
+      const picked = pickGroupIdForAdmin(list, sel, withData)
+      if (picked.id === 0) {
+        setGroupId(null)
+        return
+      }
+      setGroupId(picked.id)
+      if (picked.autoSwitched && picked.toName) {
+        writeClusterCookie(picked.id)
+        setInitHint(
+          `В шапке сайта был выбран кластер «${picked.fromName ?? '?'}» без игроков и турниров, ` +
+            `а на главной при «все кластерах» вы видите другие залы. ` +
+            `Открыт «${picked.toName}» — то же, что на главной (куки обновлены). ` +
+            `Смена вручную: вкладка «Кластеры» → «Выбрать».`
+        )
+        router.refresh()
       }
     })()
-  }, [])
+  }, [router])
 
   useEffect(() => {
     if (groupId == null) {
@@ -538,6 +583,11 @@ export default function AdminPage() {
               Частая причина: в Supabase для таблиц в схеме <code className="rounded bg-[var(--cream)] px-1">tournament</code> выключен доступ на чтение для роли
               <code className="rounded bg-[var(--cream)] px-1">anon</code> (см. Table Editor → RLS / политики).
             </p>
+          </div>
+        )}
+        {initHint && !dataLoadError && (
+          <div className="mt-3 rounded-xl border-2 border-[var(--ink)] bg-[var(--lime)]/40 px-4 py-3 text-sm font-semibold text-[var(--ink)]">
+            {initHint}
           </div>
         )}
         {!loading &&

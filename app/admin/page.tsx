@@ -16,6 +16,8 @@ export default async function AdminPage() {
       initialInitHint={init.initHint}
       initialDataLoadError={init.dataLoadError}
       shouldWriteCookieToGroupId={init.shouldWriteCookieToGroupId}
+      initialPlayers={init.initialPlayers}
+      initialTournaments={init.initialTournaments}
     />
   )
 }

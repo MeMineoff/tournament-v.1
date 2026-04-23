@@ -23,6 +23,8 @@ export type AdminViewProps = {
   initialInitHint: string | null
   initialDataLoadError: string | null
   shouldWriteCookieToGroupId: number | null
+  initialPlayers: Player[]
+  initialTournaments: Tournament[]
 }
 
 const EmojiPicker = dynamic(
@@ -88,14 +90,16 @@ export function AdminView({
   initialInitHint,
   initialDataLoadError,
   shouldWriteCookieToGroupId,
+  initialPlayers,
+  initialTournaments,
 }: AdminViewProps) {
   const router = useRouter()
   const cookieSyncedRef = useRef(false)
   const [groups, setGroups] = useState<Group[]>(initialGroups)
   const [groupId, setGroupId] = useState<number | null>(initialGroupId)
-  const [players, setPlayers] = useState<Player[]>([])
-  const [tournaments, setTournaments] = useState<Tournament[]>([])
-  const [loading, setLoading] = useState(true)
+  const [players, setPlayers] = useState<Player[]>(initialPlayers)
+  const [tournaments, setTournaments] = useState<Tournament[]>(initialTournaments)
+  const [loading, setLoading] = useState(false)
   const [dataLoadError, setDataLoadError] = useState<string | null>(
     initialDataLoadError
   )
@@ -140,24 +144,28 @@ export function AdminView({
     if (groupId == null) return
     setLoading(true)
     setDataLoadError(null)
-    const [rPlayers, rTournaments] = await Promise.all([
-      supabase.from('players').select('*').eq('group_id', groupId).order('name'),
-      supabase
-        .from('tournaments')
-        .select('*')
-        .eq('group_id', groupId)
-        .order('scheduled_date', { ascending: false }),
-    ])
-    const err = rPlayers.error ?? rTournaments.error
-    if (err) {
-      setDataLoadError(formatSupabaseError(err))
-      setPlayers([])
-      setTournaments([])
-    } else {
-      setPlayers((rPlayers.data ?? []) as Player[])
-      setTournaments((rTournaments.data ?? []) as Tournament[])
+    try {
+      const [rPlayers, rTournaments] = await Promise.all([
+        supabase.from('players').select('*').eq('group_id', groupId).order('name'),
+        supabase
+          .from('tournaments')
+          .select('*')
+          .eq('group_id', groupId)
+          .order('scheduled_date', { ascending: false }),
+      ])
+      const err = rPlayers.error ?? rTournaments.error
+      if (err) {
+        setDataLoadError(formatSupabaseError(err))
+        setPlayers([])
+        setTournaments([])
+      } else {
+        setPlayers((rPlayers.data ?? []) as Player[])
+        setTournaments((rTournaments.data ?? []) as Tournament[])
+        setDataLoadError(null)
+      }
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }, [groupId])
 
   useEffect(() => {
@@ -670,7 +678,7 @@ export function AdminView({
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            disabled={groupId === g.id || loading}
+                            disabled={groupId === g.id}
                             onClick={() => selectCluster(g.id)}
                             className="rounded-full border-2 border-[var(--ink)] bg-[var(--court-deep)] px-3 py-1.5 text-xs font-black text-[var(--cream)] shadow-[2px_2px_0_var(--ink)] transition disabled:opacity-50"
                           >

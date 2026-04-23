@@ -8,7 +8,7 @@ import './font-face.css'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'FUN Court — турниры',
+  title: 'FUN Arena — турниры',
   description: 'Турниры, матчи и FUN-рейтинг в спортивном зале',
 }
 

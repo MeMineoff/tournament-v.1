@@ -29,7 +29,7 @@ export function Nav({
             className="group flex items-center gap-2 font-[family-name:var(--font-display)] text-xl font-bold tracking-tight text-[var(--ink)] transition-transform hover:-rotate-1"
           >
             <span className="text-2xl transition group-hover:scale-110">🎾</span>
-            <span className="hidden sm:inline">FUN Court</span>
+            <span className="hidden sm:inline">FUN Arena</span>
           </Link>
           {showCluster && (
             <div className="rounded-xl border-2 border-[var(--ink)] bg-[var(--court)] px-3 py-2 shadow-[2px_2px_0_var(--ink)] sm:ml-2">

@@ -811,26 +811,34 @@ export function TournamentAdminForm({
           parent_b_match_id: null,
         }
 
-    const { data: inserted, error: insErr } = await supabase
-      .from('matches')
-      .insert(row)
-      .select('*')
-      .single()
-    if (insErr) {
-      setMsg(
-        `${insErr.message} Если написано «permission denied» — выполните в Supabase SQL миграцию supabase/migrations/20260425120000_matches_grants.sql.`
-      )
+    const resIns = await fetch('/api/admin/matches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ row }),
+    })
+    const insPayload = (await resIns.json().catch(() => null)) as
+      | { ok: true; match: Match }
+      | { ok: false; error?: string; hint?: string; details?: string }
+      | null
+    if (!resIns.ok || !insPayload || insPayload.ok !== true) {
+      const err =
+        insPayload && 'error' in insPayload && insPayload.error
+          ? insPayload.error
+          : `HTTP ${resIns.status}`
+      const hint =
+        insPayload && 'hint' in insPayload && insPayload.hint
+          ? insPayload.hint
+          : ''
+      setMsg(hint ? `${err}\n\n${hint}` : err)
       return
     }
-    if (inserted) {
-      setMatches((prev) => {
-        const list = [...prev, inserted as Match]
-        return list.sort(
-          (a, b) =>
-            a.round_index - b.round_index || a.bracket_order - b.bracket_order
-        )
-      })
-    }
+    const inserted = insPayload.match
+    setMatches((prev) => {
+      const list = [...prev, inserted]
+      return list.sort(
+        (a, b) => a.round_index - b.round_index || a.bracket_order - b.bracket_order
+      )
+    })
     setAddA('')
     setAddA2('')
     setAddB('')

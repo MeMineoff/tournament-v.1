@@ -1,4 +1,6 @@
-import type { Match, Player, Tournament } from '@/lib/types'
+import type { Match, Player, Team, Tournament } from '@/lib/types'
+import { isDoublesParticipantType } from '@/lib/participantType'
+import { getTournamentPlayerIdsFromTeams } from '@/lib/tournamentTeams'
 
 export type FunRow = Player & { funAvg: number | null; funCount: number }
 
@@ -37,9 +39,13 @@ export function matchesForGroupTable(
 
 export function tournamentPlayers(
   tournament: Tournament,
-  allGroupPlayers: Player[]
+  allGroupPlayers: Player[],
+  teams: Team[] = []
 ): Player[] {
-  const ids = tournament.participant_ids
+  const ids =
+    isDoublesParticipantType(tournament.participant_type) && teams.length > 0
+      ? getTournamentPlayerIdsFromTeams(teams)
+      : tournament.participant_ids
   if (!ids || ids.length === 0) return []
   const set = new Set(ids.map((x) => Number(x)))
   return allGroupPlayers.filter((p) => set.has(Number(p.id)))

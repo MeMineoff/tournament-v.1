@@ -26,10 +26,10 @@ function sideALabel(m: MatchEnriched, doubles: boolean) {
     return { line1: 'Не назначено', emoji: '⏳', line2: null as string | null }
   }
   return {
-    line1: m.player_a_name,
+    line1: doubles ? m.team_a_name || m.player_a_name : m.player_a_name,
     emoji: m.player_a_emoji,
     line2:
-      doubles || m.player_a2_id != null || m.player_a2_name
+      doubles ? null : m.player_a2_id != null || m.player_a2_name
         ? m.player_a2_name || '—'
         : null,
   }
@@ -43,10 +43,10 @@ function sideBLabel(m: MatchEnriched, doubles: boolean) {
     return { line1: 'Не назначено', emoji: '⏳', line2: null as string | null }
   }
   return {
-    line1: m.player_b_name,
+    line1: doubles ? m.team_b_name || m.player_b_name : m.player_b_name,
     emoji: m.player_b_emoji,
     line2:
-      doubles || m.player_b2_id != null || m.player_b2_name
+      doubles ? null : m.player_b2_id != null || m.player_b2_name
         ? m.player_b2_name || '—'
         : null,
   }

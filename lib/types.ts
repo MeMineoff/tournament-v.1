@@ -9,6 +9,7 @@ export type Team = {
   tournament_id: number
   player_1_id: number
   player_2_id: number
+  name: string | null
   sort_index: number
 }
 
@@ -71,4 +72,6 @@ export type MatchEnriched = Match & {
   player_a2_emoji: string
   player_b2_name: string
   player_b2_emoji: string
+  team_a_name?: string | null
+  team_b_name?: string | null
 }

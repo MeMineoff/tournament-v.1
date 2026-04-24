@@ -2,7 +2,11 @@ import { notFound } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { normalizeParticipantIds } from '@/lib/participantIds'
 import { supabase } from '@/lib/supabaseClient'
-import { fetchTournamentTeams } from '@/lib/tournamentTeams'
+import {
+  fetchTournamentTeams,
+  findTeamByPlayers,
+  teamDisplayName,
+} from '@/lib/tournamentTeams'
 import type {
   Group,
   Match,
@@ -105,7 +109,7 @@ export default async function TournamentPage({
 
   const byId = new Map(players.map((p) => [p.id, p]))
 
-  const scopePlayers = tournamentPlayers(t, players)
+  const scopePlayers = tournamentPlayers(t, players, teams)
   const archiveStats = computeTournamentArchiveStats(t, scopePlayers, matches)
 
   const enriched: MatchEnriched[] = matches.map((m) => {
@@ -123,6 +127,14 @@ export default async function TournamentPage({
       player_a2_emoji: pa2?.avatar_emoji ?? '',
       player_b2_name: pb2?.name ?? '',
       player_b2_emoji: pb2?.avatar_emoji ?? '',
+      team_a_name: (() => {
+        const team = findTeamByPlayers(teams, m.player_a_id, m.player_a2_id)
+        return team ? teamDisplayName(team, players) : null
+      })(),
+      team_b_name: (() => {
+        const team = findTeamByPlayers(teams, m.player_b_id, m.player_b2_id)
+        return team ? teamDisplayName(team, players) : null
+      })(),
     }
   })
 

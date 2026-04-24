@@ -5,9 +5,12 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import {
+  autoTeamName,
   canApplyTeamsToPlayoffR1,
   fetchTournamentTeams,
+  getTournamentPlayerIdsFromTeams,
   getPlayoffLeafRoundMatches,
+  teamDisplayName,
 } from '@/lib/tournamentTeams'
 import type { Match, Player, Team, Tournament } from '@/lib/types'
 import { validateDoublesMatchRoster } from '@/lib/doublesRoster'
@@ -76,13 +79,18 @@ export function TournamentAdminForm({
   const [fillTeamB, setFillTeamB] = useState<number | ''>('')
   const [newTeamP1, setNewTeamP1] = useState<number | ''>('')
   const [newTeamP2, setNewTeamP2] = useState<number | ''>('')
+  const [newTeamName, setNewTeamName] = useState('')
+  const [editingTeamId, setEditingTeamId] = useState<number | null>(null)
+  const [editingTeamName, setEditingTeamName] = useState('')
   const [teamActionBusy, setTeamActionBusy] = useState(false)
 
   const doubles = isDoublesParticipantType(tournament.participant_type)
-  const participantIdsOrdered = useMemo(
-    () => normalizeParticipantIds(tournament.participant_ids) ?? [],
-    [tournament.participant_ids]
-  )
+  const participantIdsOrdered = useMemo(() => {
+    if (doubles && teams.length > 0) {
+      return getTournamentPlayerIdsFromTeams(teams)
+    }
+    return normalizeParticipantIds(tournament.participant_ids) ?? []
+  }, [doubles, teams, tournament.participant_ids])
 
   const playerById = useMemo(() => {
     const m = new Map<number, Player>()
@@ -90,7 +98,7 @@ export function TournamentAdminForm({
     return m
   }, [groupPlayers])
 
-  /** Состав турнира в том же порядке, что и при создании (participant_ids). */
+  /** Эффективный состав турнира: для пар — из команд, иначе — participant_ids. */
   const tournamentRosterPlayers = useMemo(() => {
     const out: Player[] = []
     for (const id of participantIdsOrdered) {
@@ -116,6 +124,7 @@ export function TournamentAdminForm({
   }, [tournamentRosterPlayers, playerById, fA, fA2, fB, fB2])
 
   const rosterIdMismatch =
+    !doubles &&
     participantIdsOrdered.length > 0 &&
     tournamentRosterPlayers.length < participantIdsOrdered.length
   const participantSet = useMemo(
@@ -214,11 +223,15 @@ export function TournamentAdminForm({
     router.refresh()
   }
 
-  function labelTeamPair(p1: number, p2: number) {
+  function labelTeamPair(p1: number, p2: number, name?: string | null) {
+    const base = teamDisplayName(
+      { player_1_id: p1, player_2_id: p2, name: name ?? null },
+      groupPlayers
+    )
     const a = playerById.get(p1)
     const b = playerById.get(p2)
-    if (!a || !b) return `${p1} + ${p2}`
-    return `${a.avatar_emoji} ${a.name} · ${b.avatar_emoji} ${b.name}`
+    if (!a || !b) return base
+    return `${base} · ${a.avatar_emoji} ${a.name} + ${b.avatar_emoji} ${b.name}`
   }
 
   function teamIdForPair(p1: number | null, p2: number | null): number | '' {
@@ -258,32 +271,51 @@ export function TournamentAdminForm({
       setMsg('В паре должны быть два разных игрока.')
       return
     }
-    const pids = normalizeParticipantIds(tournament.participant_ids)
-    const g = assertAllParticipantsInTournament(
-      [Number(newTeamP1), Number(newTeamP2)],
-      pids
-    )
-    if (g) {
-      setMsg(g)
+    if (
+      teamsOrdered.some(
+        (t) =>
+          Number(t.player_1_id) === Number(newTeamP1) ||
+          Number(t.player_2_id) === Number(newTeamP1) ||
+          Number(t.player_1_id) === Number(newTeamP2) ||
+          Number(t.player_2_id) === Number(newTeamP2)
+      )
+    ) {
+      setMsg('Один из игроков уже состоит в другой команде этого турнира.')
       return
     }
     setTeamActionBusy(true)
-    const nextSort =
-      teams.length === 0 ? 0 : Math.max(...teams.map((t) => t.sort_index)) + 1
-    const { error } = await supabase.from('teams').insert({
-      tournament_id: tournament.id,
-      player_1_id: Number(newTeamP1),
-      player_2_id: Number(newTeamP2),
-      sort_index: nextSort,
+    const generatedName = autoTeamName(
+      { player_1_id: Number(newTeamP1), player_2_id: Number(newTeamP2) },
+      groupPlayers
+    )
+    const res = await fetch('/api/admin/tournaments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'createTeam',
+        tournamentId: tournament.id,
+        player1Id: Number(newTeamP1),
+        player2Id: Number(newTeamP2),
+        name: newTeamName.trim() || generatedName,
+      }),
     })
+    const payload = (await res.json().catch(() => null)) as
+      | { ok: true; team: Team }
+      | { ok: false; error?: string }
+      | null
     setTeamActionBusy(false)
-    if (error) {
-      setMsg(error.message)
+    if (!res.ok || !payload || payload.ok !== true) {
+      setMsg(
+        payload && 'error' in payload && payload.error
+          ? payload.error
+          : `Не удалось создать команду (HTTP ${res.status}).`
+      )
       return
     }
     setNewTeamP1('')
     setNewTeamP2('')
-    setMsg('Пара добавлена ✅')
+    setNewTeamName('')
+    setMsg('Команда добавлена ✅')
     await refreshAll()
   }
 
@@ -291,13 +323,56 @@ export function TournamentAdminForm({
     if (!confirm('Удалить эту пару из списка команд турнира?')) return
     setMsg(null)
     setTeamActionBusy(true)
-    const { error } = await supabase.from('teams').delete().eq('id', id)
+    const res = await fetch('/api/admin/tournaments', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'deleteTeam', teamId: id }),
+    })
+    const payload = (await res.json().catch(() => null)) as
+      | { ok: true }
+      | { ok: false; error?: string }
+      | null
     setTeamActionBusy(false)
-    if (error) {
-      setMsg(error.message)
+    if (!res.ok || !payload || payload.ok !== true) {
+      setMsg(
+        payload && 'error' in payload && payload.error
+          ? payload.error
+          : `Не удалось удалить команду (HTTP ${res.status}).`
+      )
       return
     }
-    setMsg('Пара удалена.')
+    setMsg('Команда удалена.')
+    await refreshAll()
+  }
+
+  async function saveTeamName(teamId: number) {
+    setMsg(null)
+    setTeamActionBusy(true)
+    const res = await fetch('/api/admin/tournaments', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'updateTeam',
+        teamId,
+        name: editingTeamName.trim() || null,
+      }),
+    })
+    const payload = (await res.json().catch(() => null)) as
+      | { ok: true; team: Team }
+      | { ok: false; error?: string }
+      | null
+    setTeamActionBusy(false)
+    if (!res.ok || !payload || payload.ok !== true) {
+      setMsg(
+        payload && 'error' in payload && payload.error
+          ? payload.error
+          : `Не удалось обновить имя команды (HTTP ${res.status}).`
+      )
+      return
+    }
+    setEditingTeamId(null)
+    setEditingTeamName('')
+    setMsg('Название команды обновлено ✅')
     await refreshAll()
   }
 
@@ -327,7 +402,7 @@ export function TournamentAdminForm({
       )
       return
     }
-    const pRoster = normalizeParticipantIds(tournament.participant_ids)
+    const pRoster = participantIdsOrdered
     for (let i = 0; i < leaf.length; i++) {
       const tA = sorted[2 * i]!
       const tB = sorted[2 * i + 1]!
@@ -394,6 +469,10 @@ export function TournamentAdminForm({
   }
 
   async function updateParticipantIds(next: number[]) {
+    if (doubles) {
+      setMsg('В парном турнире состав считается по командам и не редактируется отдельно.')
+      return
+    }
     setSavingPid(true)
     setMsg(null)
     // Сразу отражаем локально, чтобы кнопка выглядела «живой», даже если сеть медленная.
@@ -439,6 +518,7 @@ export function TournamentAdminForm({
   }
 
   async function addParticipant(playerId: number) {
+    if (doubles) return
     const cur = normalizeParticipantIds(tournament.participant_ids) ?? []
     if (cur.some((id) => Number(id) === Number(playerId))) return
     const next = [...cur, Number(playerId)]
@@ -446,6 +526,7 @@ export function TournamentAdminForm({
   }
 
   async function removeParticipant(playerId: number) {
+    if (doubles) return
     const cur = normalizeParticipantIds(tournament.participant_ids) ?? []
     const next = cur.filter((id) => Number(id) !== Number(playerId))
     await updateParticipantIds(next)
@@ -458,7 +539,7 @@ export function TournamentAdminForm({
       setRosterFormErr('Выберите матч.')
       return
     }
-    const pids = normalizeParticipantIds(tournament.participant_ids)
+    const pids = participantIdsOrdered
     const curMatch = matches.find((m) => m.id === fillMatchId)
     if (!curMatch) {
       setRosterFormErr('Матч не найден в списке — обновите страницу.')
@@ -586,7 +667,7 @@ export function TournamentAdminForm({
     e.preventDefault()
     setMsg(null)
     if (tournament.format !== 'round_robin') return
-    const pids = normalizeParticipantIds(tournament.participant_ids)
+    const pids = participantIdsOrdered
     let doublesRowTeams:
       | { a1: number; a2: number; b1: number; b2: number }
       | null = null
@@ -800,11 +881,12 @@ export function TournamentAdminForm({
 
       <section className="rounded-2xl border-2 border-[var(--ink)] bg-[var(--surface)] p-6 shadow-[4px_4px_0_var(--ink)]">
         <h2 className="mb-4 font-[family-name:var(--font-display)] text-xl font-bold">
-          Участники турнира
+          {doubles ? 'Состав турнира' : 'Участники турнира'}
         </h2>
         <p className="mb-4 rounded-lg border border-[var(--ink)]/20 bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--ink-muted)]">
-          Пул участников ведётся здесь. В матчах можно выбирать только людей из списка «В составе
-          турнира».
+          {doubles
+            ? 'В парном турнире состав вычисляется автоматически по списку команд ниже. Отдельно игроков в состав здесь не добавляем.'
+            : 'Пул участников ведётся здесь. В матчах можно выбирать только людей из списка «В составе турнира».'}
         </p>
         {rosterIdMismatch && (
           <p className="mb-4 rounded-lg border-2 border-[var(--clay)] bg-[var(--clay-soft)] px-3 py-2 text-xs font-bold text-[var(--ink)]">
@@ -813,13 +895,13 @@ export function TournamentAdminForm({
             Проверьте, что турнир привязан к нужному кластеру и игроки не удалялись.
           </p>
         )}
-        {savingPid && (
+        {!doubles && savingPid && (
           <p className="mb-2 text-sm font-semibold text-[var(--ink-muted)]">Сохранение состава…</p>
         )}
         <div className="mb-6">
           <p className="mb-2 text-sm font-bold">
             В составе турнира ({tournamentRosterPlayers.length})
-            {participantIdsOrdered.length > 0 && (
+            {!doubles && participantIdsOrdered.length > 0 && (
               <span className="ml-2 font-mono text-xs font-normal text-[var(--ink-muted)]">
                 · в БД: {participantIdsOrdered.length} id
               </span>
@@ -840,46 +922,50 @@ export function TournamentAdminForm({
                   <span>
                     {p.avatar_emoji} <strong>{p.name}</strong>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => void removeParticipant(Number(p.id))}
-                    disabled={savingPid}
-                    className="rounded-full border-2 border-[var(--clay)] bg-[var(--clay-soft)] px-3 py-1 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Убрать
-                  </button>
+                  {!doubles && (
+                    <button
+                      type="button"
+                      onClick={() => void removeParticipant(Number(p.id))}
+                      disabled={savingPid}
+                      className="rounded-full border-2 border-[var(--clay)] bg-[var(--clay-soft)] px-3 py-1 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Убрать
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           )}
         </div>
-        <div>
-          <p className="mb-2 text-sm font-bold">Игроки кластера вне турнира ({notInTournament.length})</p>
-          {notInTournament.length === 0 ? (
-            <p className="text-sm text-[var(--ink-muted)]">Все игроки кластера уже добавлены.</p>
-          ) : (
-            <ul className="space-y-2">
-              {notInTournament.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)]/40 px-3 py-2"
-                >
-                  <span>
-                    {p.avatar_emoji} {p.name}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void addParticipant(Number(p.id))}
-                    disabled={savingPid}
-                    className="rounded-full border-2 border-[var(--ink)] bg-[var(--lime)] px-3 py-1 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
+        {!doubles && (
+          <div>
+            <p className="mb-2 text-sm font-bold">Игроки кластера вне турнира ({notInTournament.length})</p>
+            {notInTournament.length === 0 ? (
+              <p className="text-sm text-[var(--ink-muted)]">Все игроки кластера уже добавлены.</p>
+            ) : (
+              <ul className="space-y-2">
+                {notInTournament.map((p) => (
+                  <li
+                    key={p.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)]/40 px-3 py-2"
                   >
-                    Добавить
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                    <span>
+                      {p.avatar_emoji} {p.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void addParticipant(Number(p.id))}
+                      disabled={savingPid}
+                      className="rounded-full border-2 border-[var(--ink)] bg-[var(--lime)] px-3 py-1 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Добавить
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </section>
 
       {doubles && (
@@ -894,7 +980,7 @@ export function TournamentAdminForm({
             пуст, пары в таблице строятся по составу: два id подряд в «участниках».
           </p>
           {teamsOrdered.length === 0 ? (
-            <p className="mb-3 text-sm text-[var(--ink-muted)]">Пар пока нет — добавьте пару снизу.</p>
+            <p className="mb-3 text-sm text-[var(--ink-muted)]">Команд пока нет — добавьте первую снизу.</p>
           ) : (
             <ol className="mb-4 list-decimal space-y-2 pl-5 text-sm">
               {teamsOrdered.map((t) => (
@@ -902,15 +988,60 @@ export function TournamentAdminForm({
                   key={t.id}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-[var(--ink)] bg-[var(--surface-2)] px-3 py-2"
                 >
-                  <span className="font-medium">{labelTeamPair(t.player_1_id, t.player_2_id)}</span>
-                  <button
-                    type="button"
-                    onClick={() => void removeTournamentTeam(t.id)}
-                    disabled={teamActionBusy}
-                    className="rounded-full border-2 border-[var(--clay)] bg-[var(--clay-soft)] px-3 py-1 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Удалить
-                  </button>
+                  {editingTeamId === t.id ? (
+                    <div className="flex w-full flex-wrap items-center gap-2">
+                      <input
+                        value={editingTeamName}
+                        onChange={(e) => setEditingTeamName(e.target.value)}
+                        className="min-w-[220px] flex-1 rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-3 py-2 text-sm"
+                        placeholder={autoTeamName(t, groupPlayers)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void saveTeamName(t.id)}
+                        disabled={teamActionBusy}
+                        className="rounded-full border-2 border-[var(--ink)] bg-[var(--lime)] px-3 py-1 text-xs font-black disabled:opacity-60"
+                      >
+                        Сохранить
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingTeamId(null)
+                          setEditingTeamName('')
+                        }}
+                        className="rounded-full border-2 border-[var(--ink)] bg-[var(--surface)] px-3 py-1 text-xs font-black"
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="font-medium">
+                        {labelTeamPair(t.player_1_id, t.player_2_id, t.name)}
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingTeamId(t.id)
+                            setEditingTeamName(t.name ?? '')
+                          }}
+                          className="rounded-full border-2 border-[var(--ink)] bg-[var(--surface)] px-3 py-1 text-xs font-black"
+                        >
+                          Имя
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void removeTournamentTeam(t.id)}
+                          disabled={teamActionBusy}
+                          className="rounded-full border-2 border-[var(--clay)] bg-[var(--clay-soft)] px-3 py-1 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </li>
               ))}
             </ol>
@@ -920,7 +1051,7 @@ export function TournamentAdminForm({
             onSubmit={(e) => void addTournamentTeam(e)}
             className="mb-4 grid gap-3 border-t border-[var(--ink)]/20 pt-4 sm:grid-cols-2"
           >
-            <p className="text-sm font-bold sm:col-span-full">Добавить пару</p>
+            <p className="text-sm font-bold sm:col-span-full">Добавить команду</p>
             <label className="text-sm font-bold">
               Игрок 1
               <select
@@ -932,7 +1063,7 @@ export function TournamentAdminForm({
                 className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
               >
                 <option value="">—</option>
-                {tournamentRosterPlayers.map((p) => (
+                {groupPlayers.map((p) => (
                   <option
                     key={p.id}
                     value={String(p.id)}
@@ -954,7 +1085,7 @@ export function TournamentAdminForm({
                 className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
               >
                 <option value="">—</option>
-                {tournamentRosterPlayers.map((p) => (
+                {groupPlayers.map((p) => (
                   <option
                     key={p.id}
                     value={String(p.id)}
@@ -965,13 +1096,33 @@ export function TournamentAdminForm({
                 ))}
               </select>
             </label>
+            <label className="text-sm font-bold sm:col-span-full">
+              Название команды
+              <input
+                value={newTeamName}
+                onChange={(e) => setNewTeamName(e.target.value)}
+                placeholder={
+                  newTeamP1 !== '' && newTeamP2 !== ''
+                    ? autoTeamName(
+                        {
+                          player_1_id: Number(newTeamP1),
+                          player_2_id: Number(newTeamP2),
+                        },
+                        groupPlayers
+                      )
+                    : 'Например: Smash Bros'
+                }
+                disabled={teamActionBusy}
+                className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-3 py-2"
+              />
+            </label>
             <div className="sm:col-span-full">
               <button
                 type="submit"
-                disabled={teamActionBusy || tournamentRosterPlayers.length < 2}
+                disabled={teamActionBusy || groupPlayers.length < 2}
                 className="rounded-full border-2 border-[var(--ink)] bg-[var(--lime)] px-6 py-2.5 text-sm font-black shadow-[3px_3px_0_var(--ink)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Добавить пару
+                Добавить команду
               </button>
             </div>
           </form>
@@ -1031,7 +1182,7 @@ export function TournamentAdminForm({
                           value={String(t.id)}
                           disabled={optionTaken(Number(t.id), addTeamA, [addTeamB])}
                         >
-                          {labelTeamPair(t.player_1_id, t.player_2_id)}
+                          {labelTeamPair(t.player_1_id, t.player_2_id, t.name)}
                         </option>
                       ))}
                     </select>
@@ -1052,7 +1203,7 @@ export function TournamentAdminForm({
                           value={String(t.id)}
                           disabled={optionTaken(Number(t.id), addTeamB, [addTeamA])}
                         >
-                          {labelTeamPair(t.player_1_id, t.player_2_id)}
+                          {labelTeamPair(t.player_1_id, t.player_2_id, t.name)}
                         </option>
                       ))}
                     </select>
@@ -1128,8 +1279,17 @@ export function TournamentAdminForm({
                   >
                     <span className="font-mono text-xs">#{m.id}</span>
                     <span>
-                      {m.player_a_id ?? '—'} vs {m.player_b_id ?? '—'}
-                      {doubles && ` (+ партнёры)`}
+                      {doubles
+                        ? `${labelTeamPair(
+                            Number(m.player_a_id ?? 0),
+                            Number(m.player_a2_id ?? 0),
+                            teamById.get(Number(teamIdForPair(m.player_a_id, m.player_a2_id)))?.name
+                          )} vs ${labelTeamPair(
+                            Number(m.player_b_id ?? 0),
+                            Number(m.player_b2_id ?? 0),
+                            teamById.get(Number(teamIdForPair(m.player_b_id, m.player_b2_id)))?.name
+                          )}`
+                        : `${m.player_a_id ?? '—'} vs ${m.player_b_id ?? '—'}`}
                     </span>
                     <div className="flex gap-2">
                       <button
@@ -1157,10 +1317,8 @@ export function TournamentAdminForm({
         {tournament.format === 'playoff' && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--ink-muted)]">
-              Пустые ячейки сетки можно заполнить или переназначить. В списках выбора —
-              только игроки из блока «В составе» выше. Для сетки 4 в парах логично иметь
-              минимум 8 человек в составе (4 пары), но можно и больше — лишние остаются в
-              резерве.
+              Пустые ячейки сетки можно заполнить или переназначить. Для парного плей-офф
+              используются команды из блока выше; для одиночек — игроки из состава турнира.
             </p>
             <div className="overflow-x-auto rounded-xl border-2 border-[var(--ink)]">
               <table className="w-full text-left text-sm">
@@ -1266,7 +1424,7 @@ export function TournamentAdminForm({
                               optionTaken(Number(t.id), fillTeamA, [fillTeamB]) || busy
                             }
                           >
-                            {labelTeamPair(t.player_1_id, t.player_2_id)}
+                            {labelTeamPair(t.player_1_id, t.player_2_id, t.name)}
                           </option>
                         )
                       })}
@@ -1294,7 +1452,7 @@ export function TournamentAdminForm({
                               optionTaken(Number(t.id), fillTeamB, [fillTeamA]) || busy
                             }
                           >
-                            {labelTeamPair(t.player_1_id, t.player_2_id)}
+                            {labelTeamPair(t.player_1_id, t.player_2_id, t.name)}
                           </option>
                         )
                       })}

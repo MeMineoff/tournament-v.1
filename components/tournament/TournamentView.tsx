@@ -19,6 +19,7 @@ import {
 import { isDoublesParticipantType } from '@/lib/participantType'
 import type { TournamentArchiveStats } from '@/lib/aggregateStats'
 import { TournamentStatsBlock } from '@/components/tournament/TournamentStatsBlock'
+import { teamDisplayName } from '@/lib/tournamentTeams'
 
 type Tab = 'matches' | 'fun' | 'table'
 
@@ -70,8 +71,8 @@ export default function TournamentView({
   const [modalMatch, setModalMatch] = useState<MatchEnriched | null>(null)
 
   const scopePlayers = useMemo(
-    () => tournamentPlayers(tournament, players),
-    [tournament, players]
+    () => tournamentPlayers(tournament, players, teams),
+    [tournament, players, teams]
   )
 
   const standingsMatches = useMemo(
@@ -269,10 +270,10 @@ export default function TournamentView({
                           <div className="flex items-center gap-2">
                             <span className="text-2xl">{m.player_a_emoji}</span>
                             <span className="truncate font-bold leading-tight">
-                              {m.player_a_name}
+                              {playoffDoublesLayout ? m.team_a_name || m.player_a_name : m.player_a_name}
                             </span>
                           </div>
-                          {(m.player_a2_id != null || m.player_a2_name) && (
+                          {!playoffDoublesLayout && (m.player_a2_id != null || m.player_a2_name) && (
                             <div className="flex items-center gap-2 pl-1 text-sm">
                               <span>{m.player_a2_emoji}</span>
                               <span className="truncate font-semibold">
@@ -287,11 +288,11 @@ export default function TournamentView({
                         <div className="flex min-w-0 flex-1 flex-col items-end gap-0.5 text-right">
                           <div className="flex items-center gap-2">
                             <span className="truncate font-bold leading-tight">
-                              {m.player_b_name}
+                              {playoffDoublesLayout ? m.team_b_name || m.player_b_name : m.player_b_name}
                             </span>
                             <span className="text-2xl">{m.player_b_emoji}</span>
                           </div>
-                          {(m.player_b2_id != null || m.player_b2_name) && (
+                          {!playoffDoublesLayout && (m.player_b2_id != null || m.player_b2_name) && (
                             <div className="flex items-center gap-2 pr-1 text-sm">
                               <span className="truncate font-semibold">
                                 {m.player_b2_name || '—'}
@@ -406,28 +407,20 @@ export default function TournamentView({
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex min-w-0 flex-col gap-1.5">
-                              <Link
-                                href={`/player/${row.playerA.id}`}
-                                className="inline-flex min-w-0 items-center gap-2 font-bold text-[var(--ink)] transition hover:underline"
-                              >
-                                <span className="shrink-0 text-xl leading-none">
-                                  {row.playerA.avatar_emoji}
-                                </span>
-                                <span className="min-w-0 truncate">
-                                  {row.playerA.name}
-                                </span>
-                              </Link>
-                              <Link
-                                href={`/player/${row.playerB.id}`}
-                                className="inline-flex min-w-0 items-center gap-2 font-bold text-[var(--ink)] transition hover:underline"
-                              >
-                                <span className="shrink-0 text-xl leading-none">
-                                  {row.playerB.avatar_emoji}
-                                </span>
-                                <span className="min-w-0 truncate">
-                                  {row.playerB.name}
-                                </span>
-                              </Link>
+                              <div className="font-bold text-[var(--ink)]">
+                                {teamDisplayName(
+                                  {
+                                    player_1_id: row.playerA.id,
+                                    player_2_id: row.playerB.id,
+                                    name: null,
+                                  },
+                                  players
+                                )}
+                              </div>
+                              <div className="text-xs text-[var(--ink-muted)]">
+                                {row.playerA.avatar_emoji} {row.playerA.name} · {row.playerB.avatar_emoji}{' '}
+                                {row.playerB.name}
+                              </div>
                             </div>
                           </td>
                           <td className="px-4 py-3">{row.played}</td>

@@ -14,7 +14,7 @@ type InsertBody = {
 }
 
 const CONFIG_HINT =
-  'В Vercel (Settings → Environment Variables): SUPABASE_SERVICE_ROLE_KEY = legacy JWT «service_role» (Settings → API → Legacy API Keys) ИЛИ secret sb_secret_… (API Keys). Схема `tournament` в Settings → Data API → Exposed schemas. После смены env — Redeploy. Миграция прав: supabase/migrations/20260425120000_matches_grants.sql'
+  'В Vercel (Settings → Environment Variables): SUPABASE_SERVICE_ROLE_KEY = legacy JWT «service_role» (Settings → API → Legacy API Keys) ИЛИ secret sb_secret_… (API Keys). Схема `tournament` в Settings → Data API → Exposed schemas. После смены env — Redeploy. Миграции прав: supabase/migrations/20260425120000_matches_grants.sql и supabase/migrations/20260425191500_service_role_tournament_schema_grants.sql'
 
 function badRequest(message: string) {
   return NextResponse.json({ ok: false, error: message }, { status: 400 })

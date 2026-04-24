@@ -1,5 +1,3 @@
-'use client'
-
 import { supabase } from '@/lib/supabaseClient'
 import type { BracketMatchInsert } from '@/lib/bracket'
 

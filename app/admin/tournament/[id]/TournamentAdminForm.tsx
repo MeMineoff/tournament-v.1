@@ -162,8 +162,15 @@ export function TournamentAdminForm({
     return canApplyTeamsToPlayoffR1(tournament, teamsOrdered, matches)
   }, [doubles, tournament, teamsOrdered, matches])
 
-  /** Только при смене турнира: нельзя синхать на каждое обновление initialTeams (router.refresh) — иначе затирается свежий список после createTeam, пока RSC кэш не догонит БД. */
+  /** Только при смене турнира: не дублируем full sync initial* при каждом RSC-refresh. */
   useEffect(() => {
+    setTournament({
+      ...initialTournament,
+      participant_ids: normalizeParticipantIds(
+        initialTournament.participant_ids as unknown
+      ),
+    } as Tournament)
+    setMatches(initialMatches)
     setTeams(initialTeams)
   }, [initialTournament.id])
 

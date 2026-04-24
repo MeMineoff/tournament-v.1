@@ -27,20 +27,3 @@ export function parseClusterSelection(
   return n
 }
 
-/** Для админки и запросов, где нужен один group_id. */
-export function resolveConcreteGroupId(
-  groups: { id: number }[],
-  selection: ClusterSelection
-): number | null {
-  if (!groups.length) return null
-  if (selection === 'all') return groups[0]!.id
-  return selection
-}
-
-/** @deprecated Используйте parseClusterSelection / resolveConcreteGroupId */
-export function resolveGroupId(
-  groups: { id: number }[],
-  raw: string | undefined | null
-): number {
-  return resolveConcreteGroupId(groups, parseClusterSelection(groups, raw)) ?? 1
-}

@@ -42,7 +42,7 @@ export function funReceivedByPlayerInMatch(
   return s
 }
 
-export type PlayerCareerStats = {
+type PlayerCareerStats = {
   totalMatches: number
   wins: number
   losses: number

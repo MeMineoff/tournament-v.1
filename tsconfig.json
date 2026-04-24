@@ -35,5 +35,5 @@
     "*.ts",
     "*.mts"
   ],
-  "exclude": ["node_modules", "tournament_archive(1)"]
+  "exclude": ["node_modules"]
 }

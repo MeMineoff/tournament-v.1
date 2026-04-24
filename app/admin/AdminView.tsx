@@ -7,15 +7,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Theme } from 'emoji-picker-react'
 import { supabase } from '@/lib/supabaseClient'
 import type { Group, Player, Tournament } from '@/lib/types'
-import { buildPlayoffBracketSkeleton, tierSizesForBracket } from '@/lib/bracket'
-import { insertBracketInTiers } from '@/lib/bracketInsert'
 import {
   CLUSTER_COOKIE_MAX_AGE,
   CLUSTER_COOKIE_NAME,
   CLUSTER_COOKIE_VALUE_ALL,
   parseClusterSelection,
 } from '@/lib/cluster'
-import { deleteGroupCascade, deleteTournamentCascade } from '@/lib/adminDelete'
+import { deleteGroupCascade } from '@/lib/adminDelete'
 import { appendBrowserSupabaseNetworkHint } from '@/lib/supabaseNetworkHint'
 
 export type AdminViewProps = {
@@ -253,93 +251,47 @@ export function AdminView({
       return
     }
     setCreatingTournament(true)
-    setMsg('⏳ Создаём турнир (запрос к базе)…')
-    let tid: number | null = null
-
+    setMsg('⏳ Создаём турнир…')
     try {
-      const playoff_bracket_size = tFormat === 'playoff' ? playoffSize : null
-      const participant_type = tPart
+      const res = await fetch('/api/admin/tournaments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupId,
+          name: tName.trim(),
+          description: tDesc.trim() || null,
+          scheduledDate: tDate,
+          format: tFormat,
+          participantType: tPart,
+          playoffBracketSize: tFormat === 'playoff' ? playoffSize : undefined,
+        }),
+      })
 
-      const tournamentPayload = {
-        group_id: groupId,
-        name: tName.trim(),
-        description: tDesc.trim() || null,
-        scheduled_date: tDate,
-        format: tFormat,
-        participant_type,
-        status: 'active' as const,
-        playoff_bracket_size,
-        participant_ids: null,
-      }
+      const payload = (await res.json().catch(() => null)) as
+        | { ok: true; tournament: Tournament; matchCount?: number }
+        | { ok: false; error?: string }
+        | null
 
-      const { data: created, error } = await supabase
-        .from('tournaments')
-        .insert(tournamentPayload)
-        .select('id')
-        .single()
-
-      if (error) {
-        console.error('[admin createTournament]', error)
-        setMsg(formatSupabaseError(error))
+      if (!res.ok || !payload || payload.ok !== true) {
+        const errText =
+          payload && 'error' in payload && payload.error
+            ? payload.error
+            : `HTTP ${res.status}`
+        setMsg(appendBrowserSupabaseNetworkHint(errText))
         return
       }
 
-      tid = created!.id as number
-
-      if (tFormat === 'playoff') {
-        setMsg('⏳ Создаём сетку плей-офф (несколько шагов в БД)…')
-        const { rows, parentLinks } = buildPlayoffBracketSkeleton(
-          tid,
-          playoffSize,
-          participant_type
-        )
-        await insertBracketInTiers(
-          rows,
-          parentLinks,
-          tierSizesForBracket(playoffSize)
-        )
-      }
-
+      const tid = Number(payload.tournament.id)
+      const matchNote =
+        tFormat === 'playoff' ? ` · матчей в БД: ${payload.matchCount ?? 0}` : ''
+      setTournaments((prev) => [payload.tournament, ...prev])
       setTName('')
       setTDesc('')
-
-      let matchNote = ''
-      if (tFormat === 'playoff' && tid != null) {
-        const { count, error: cErr } = await supabase
-          .from('matches')
-          .select('*', { count: 'exact', head: true })
-          .eq('tournament_id', tid)
-        if (!cErr && count != null) {
-          matchNote = ` · матчей в БД: ${count}`
-        }
-      }
-      setMsg(
-        `Турнир создан 🏆${matchNote} Состав и матчи: /admin/tournament/${tid}`
-      )
-      void loadGroupData().catch((e) => {
-        console.error('[admin] loadGroupData после создания турнира', e)
-        setMsg((m) =>
-          m
-            ? `${m}\n\nСписок турниров не обновился — обновите страницу.`
-            : 'Список не обновился — обновите страницу.'
-        )
-      })
+      setMsg(`Турнир создан 🏆${matchNote} Состав и матчи: /admin/tournament/${tid}`)
+      router.refresh()
     } catch (err: unknown) {
-      console.error('[admin createTournament] этап матчей / сетки', err)
-      const detail = formatUnknownSupabaseErr(err)
-      if (tid != null) {
-        const rollbackErr = await deleteTournamentCascade(supabase, tid)
-        setMsg(
-          `${detail}${
-            rollbackErr
-              ? `\n\nНе удалось убрать черновик турнира из БД: ${rollbackErr} (id ${tid}).`
-              : `\n\nЧерновик турнира удалён. Проверьте миграции matches (doubles-колонки, participant_type).`
-          }`
-        )
-      } else {
-        setMsg(detail)
-      }
-      void loadGroupData()
+      console.error('[admin createTournament API]', err)
+      setMsg(formatUnknownSupabaseErr(err))
     } finally {
       setCreatingTournament(false)
     }
@@ -436,14 +388,32 @@ export function AdminView({
     )
       return
     setMsg(null)
-    const err = await deleteTournamentCascade(supabase, id)
-    if (err) {
-      setMsg(err)
+    let payload: { ok?: boolean; error?: string } | null = null
+    try {
+      const res = await fetch('/api/admin/tournaments', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      payload = (await res.json().catch(() => null)) as
+        | { ok: true }
+        | { ok: false; error?: string }
+        | null
+      if (!res.ok || !payload || payload.ok !== true) {
+        setMsg(
+          appendBrowserSupabaseNetworkHint(
+            payload?.error ?? `Удаление не выполнено (HTTP ${res.status}).`
+          )
+        )
+        return
+      }
+    } catch (e: unknown) {
+      setMsg(formatUnknownSupabaseErr(e))
       return
     }
     setEditingTournamentId((cur) => (cur === id ? null : cur))
+    setTournaments((prev) => prev.filter((t) => t.id !== id))
     setMsg('Турнир удалён')
-    await loadGroupData()
     router.refresh()
   }
 

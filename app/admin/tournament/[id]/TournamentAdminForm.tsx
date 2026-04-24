@@ -2,9 +2,14 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import type { Match, Player, Tournament } from '@/lib/types'
+import {
+  canApplyTeamsToPlayoffR1,
+  fetchTournamentTeams,
+  getPlayoffLeafRoundMatches,
+} from '@/lib/tournamentTeams'
+import type { Match, Player, Team, Tournament } from '@/lib/types'
 import { validateDoublesMatchRoster } from '@/lib/doublesRoster'
 import { normalizeParticipantIds } from '@/lib/participantIds'
 import { assertAllParticipantsInTournament } from '@/lib/participantGuards'
@@ -29,12 +34,14 @@ type Props = {
   tournament: Tournament
   groupPlayers: Player[]
   initialMatches: Match[]
+  initialTeams?: Team[]
 }
 
 export function TournamentAdminForm({
   tournament: initialTournament,
   groupPlayers,
   initialMatches,
+  initialTeams = [],
 }: Props) {
   const router = useRouter()
   const [tournament, setTournament] = useState<Tournament>(() => ({
@@ -44,6 +51,7 @@ export function TournamentAdminForm({
     ),
   }))
   const [matches, setMatches] = useState(initialMatches)
+  const [teams, setTeams] = useState<Team[]>(initialTeams)
   const [msg, setMsg] = useState<string | null>(null)
   /** Ошибки именно формы «Назначение состава» — видны рядом с кнопкой, не только вверху страницы. */
   const [rosterFormErr, setRosterFormErr] = useState<string | null>(null)
@@ -62,6 +70,9 @@ export function TournamentAdminForm({
   const [addA2, setAddA2] = useState<number | ''>('')
   const [addB, setAddB] = useState<number | ''>('')
   const [addB2, setAddB2] = useState<number | ''>('')
+  const [newTeamP1, setNewTeamP1] = useState<number | ''>('')
+  const [newTeamP2, setNewTeamP2] = useState<number | ''>('')
+  const [teamActionBusy, setTeamActionBusy] = useState(false)
 
   const doubles = isDoublesParticipantType(tournament.participant_type)
   const participantIdsOrdered = useMemo(
@@ -112,6 +123,20 @@ export function TournamentAdminForm({
     [groupPlayers, participantSet]
   )
 
+  const teamsOrdered = useMemo(
+    () => [...teams].sort((a, b) => a.sort_index - b.sort_index),
+    [teams]
+  )
+
+  const playoffR1FromTeamsError = useMemo(() => {
+    if (!doubles || tournament.format !== 'playoff') return null
+    return canApplyTeamsToPlayoffR1(tournament, teamsOrdered, matches)
+  }, [doubles, tournament, teamsOrdered, matches])
+
+  useEffect(() => {
+    setTeams(initialTeams)
+  }, [initialTeams])
+
   const playoffBusyElsewhere = useMemo(() => {
     if (tournament.format !== 'playoff' || fillMatchId === '') {
       return new Set<number>()
@@ -146,7 +171,7 @@ export function TournamentAdminForm({
   }
 
   async function refreshAll() {
-    const [{ data: tr }, { data: mr }] = await Promise.all([
+    const [{ data: tr }, { data: mr }, freshTeams] = await Promise.all([
       supabase.from('tournaments').select('*').eq('id', tournament.id).single(),
       supabase
         .from('matches')
@@ -154,6 +179,7 @@ export function TournamentAdminForm({
         .eq('tournament_id', tournament.id)
         .order('round_index', { ascending: true })
         .order('bracket_order', { ascending: true }),
+      fetchTournamentTeams(supabase, tournament.id),
     ])
     if (tr) {
       const row = tr as Tournament & { participant_ids?: unknown }
@@ -163,7 +189,161 @@ export function TournamentAdminForm({
       } as Tournament)
     }
     if (mr) setMatches(mr as Match[])
+    setTeams(freshTeams)
     router.refresh()
+  }
+
+  function labelTeamPair(p1: number, p2: number) {
+    const a = playerById.get(p1)
+    const b = playerById.get(p2)
+    if (!a || !b) return `${p1} + ${p2}`
+    return `${a.avatar_emoji} ${a.name} · ${b.avatar_emoji} ${b.name}`
+  }
+
+  async function addTournamentTeam(e: React.FormEvent) {
+    e.preventDefault()
+    setMsg(null)
+    if (newTeamP1 === '' || newTeamP2 === '') {
+      setMsg('Выберите обоих игрока пары.')
+      return
+    }
+    if (newTeamP1 === newTeamP2) {
+      setMsg('В паре должны быть два разных игрока.')
+      return
+    }
+    const pids = normalizeParticipantIds(tournament.participant_ids)
+    const g = assertAllParticipantsInTournament(
+      [Number(newTeamP1), Number(newTeamP2)],
+      pids
+    )
+    if (g) {
+      setMsg(g)
+      return
+    }
+    setTeamActionBusy(true)
+    const nextSort =
+      teams.length === 0 ? 0 : Math.max(...teams.map((t) => t.sort_index)) + 1
+    const { error } = await supabase.from('teams').insert({
+      tournament_id: tournament.id,
+      player_1_id: Number(newTeamP1),
+      player_2_id: Number(newTeamP2),
+      sort_index: nextSort,
+    })
+    setTeamActionBusy(false)
+    if (error) {
+      setMsg(error.message)
+      return
+    }
+    setNewTeamP1('')
+    setNewTeamP2('')
+    setMsg('Пара добавлена ✅')
+    await refreshAll()
+  }
+
+  async function removeTournamentTeam(id: number) {
+    if (!confirm('Удалить эту пару из списка команд турнира?')) return
+    setMsg(null)
+    setTeamActionBusy(true)
+    const { error } = await supabase.from('teams').delete().eq('id', id)
+    setTeamActionBusy(false)
+    if (error) {
+      setMsg(error.message)
+      return
+    }
+    setMsg('Пара удалена.')
+    await refreshAll()
+  }
+
+  async function applyPlayoffR1FromTeams() {
+    setMsg(null)
+    const err = canApplyTeamsToPlayoffR1(tournament, teamsOrdered, matches)
+    if (err) {
+      setMsg(err)
+      return
+    }
+    const leaf = getPlayoffLeafRoundMatches(matches)
+    const sorted = teamsOrdered
+    const allPids: number[] = []
+    for (let i = 0; i < leaf.length; i++) {
+      const tA = sorted[2 * i]!
+      const tB = sorted[2 * i + 1]!
+      allPids.push(
+        tA.player_1_id,
+        tA.player_2_id,
+        tB.player_1_id,
+        tB.player_2_id
+      )
+    }
+    if (new Set(allPids).size !== allPids.length) {
+      setMsg(
+        'Среди выбранных пар есть общий игрок. В одном туре плей-офф участник не может играть дважды.'
+      )
+      return
+    }
+    const pRoster = normalizeParticipantIds(tournament.participant_ids)
+    for (let i = 0; i < leaf.length; i++) {
+      const tA = sorted[2 * i]!
+      const tB = sorted[2 * i + 1]!
+      const m = leaf[i]!
+      const v = validateDoublesMatchRoster(
+        tA.player_1_id,
+        tA.player_2_id,
+        tB.player_1_id,
+        tB.player_2_id
+      )
+      if (v) {
+        setMsg(v)
+        return
+      }
+      const w = assertAllParticipantsInTournament(
+        [
+          tA.player_1_id,
+          tA.player_2_id,
+          tB.player_1_id,
+          tB.player_2_id,
+        ],
+        pRoster
+      )
+      if (w) {
+        setMsg(w)
+        return
+      }
+    }
+    if (leaf.some((m) => m.status === 'completed')) {
+      if (
+        !confirm(
+          'В матчах первого раунда уже есть завершённые игры. Перезаписать состав (сброс сетки в этих ячейках: счёт 0:0, статус «запланировано»)?'
+        )
+      ) {
+        return
+      }
+    }
+    setTeamActionBusy(true)
+    for (let i = 0; i < leaf.length; i++) {
+      const tA = sorted[2 * i]!
+      const tB = sorted[2 * i + 1]!
+      const m = leaf[i]!
+      const { error } = await supabase
+        .from('matches')
+        .update({
+          player_a_id: tA.player_1_id,
+          player_a2_id: tA.player_2_id,
+          player_b_id: tB.player_1_id,
+          player_b2_id: tB.player_2_id,
+          score_a: 0,
+          score_b: 0,
+          status: 'scheduled',
+        })
+        .eq('id', m.id)
+      if (error) {
+        setTeamActionBusy(false)
+        setMsg(error.message)
+        return
+      }
+    }
+    setTeamActionBusy(false)
+    setMsg('Первый раунд сетки заполнен по списку пар ✅')
+    await refreshAll()
   }
 
   async function updateParticipantIds(next: number[]) {
@@ -589,6 +769,128 @@ export function TournamentAdminForm({
           )}
         </div>
       </section>
+
+      {doubles && (
+        <section className="rounded-2xl border-2 border-[var(--ink)] bg-[var(--surface)] p-6 shadow-[4px_4px_0_var(--ink)]">
+          <h2 className="mb-2 font-[family-name:var(--font-display)] text-xl font-bold">
+            Пары (команды) турнира
+          </h2>
+          <p className="mb-4 text-xs text-[var(--ink-muted)]">
+            Список хранится в базе, привязан к этому турниру. Порядок важен: сначала идут пары
+            с меньшим <span className="font-mono">sort_index</span> (как в таблице ниже). Для
+            круга и турнирной таблицы по командам используются именно эти пары. Если список
+            пуст, пары в таблице строятся по составу: два id подряд в «участниках».
+          </p>
+          {teamsOrdered.length === 0 ? (
+            <p className="mb-3 text-sm text-[var(--ink-muted)]">Пар пока нет — добавьте пару снизу.</p>
+          ) : (
+            <ol className="mb-4 list-decimal space-y-2 pl-5 text-sm">
+              {teamsOrdered.map((t) => (
+                <li
+                  key={t.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-[var(--ink)] bg-[var(--surface-2)] px-3 py-2"
+                >
+                  <span className="font-medium">{labelTeamPair(t.player_1_id, t.player_2_id)}</span>
+                  <button
+                    type="button"
+                    onClick={() => void removeTournamentTeam(t.id)}
+                    disabled={teamActionBusy}
+                    className="rounded-full border-2 border-[var(--clay)] bg-[var(--clay-soft)] px-3 py-1 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Удалить
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          <form
+            onSubmit={(e) => void addTournamentTeam(e)}
+            className="mb-4 grid gap-3 border-t border-[var(--ink)]/20 pt-4 sm:grid-cols-2"
+          >
+            <p className="text-sm font-bold sm:col-span-full">Добавить пару</p>
+            <label className="text-sm font-bold">
+              Игрок 1
+              <select
+                value={newTeamP1 === '' ? '' : String(newTeamP1)}
+                onChange={(e) =>
+                  setNewTeamP1(e.target.value === '' ? '' : Number(e.target.value))
+                }
+                disabled={teamActionBusy}
+                className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
+              >
+                <option value="">—</option>
+                {tournamentRosterPlayers.map((p) => (
+                  <option
+                    key={p.id}
+                    value={String(p.id)}
+                    disabled={optionTaken(Number(p.id), newTeamP1, [newTeamP2])}
+                  >
+                    {p.avatar_emoji} {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-bold">
+              Игрок 2
+              <select
+                value={newTeamP2 === '' ? '' : String(newTeamP2)}
+                onChange={(e) =>
+                  setNewTeamP2(e.target.value === '' ? '' : Number(e.target.value))
+                }
+                disabled={teamActionBusy}
+                className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
+              >
+                <option value="">—</option>
+                {tournamentRosterPlayers.map((p) => (
+                  <option
+                    key={p.id}
+                    value={String(p.id)}
+                    disabled={optionTaken(Number(p.id), newTeamP2, [newTeamP1])}
+                  >
+                    {p.avatar_emoji} {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="sm:col-span-full">
+              <button
+                type="submit"
+                disabled={teamActionBusy || tournamentRosterPlayers.length < 2}
+                className="rounded-full border-2 border-[var(--ink)] bg-[var(--lime)] px-6 py-2.5 text-sm font-black shadow-[3px_3px_0_var(--ink)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Добавить пару
+              </button>
+            </div>
+          </form>
+
+          {tournament.format === 'playoff' && (
+            <div className="border-t border-[var(--ink)]/20 pt-4">
+              <p className="mb-2 text-sm font-bold">Плей-офф: первый раунд сетки</p>
+              <p className="mb-3 text-xs text-[var(--ink-muted)]">
+                Матч 1: пара #1 vs #2, матч 2: #3 vs #4, и так далее. Нужен полный набор:{' '}
+                <span className="font-mono">
+                  {tournament.playoff_bracket_size ?? '—'}
+                </span>{' '}
+                команд, столько же матчей в нижней линии сетки.
+              </p>
+              {playoffR1FromTeamsError && (
+                <p className="mb-2 rounded-lg border-2 border-[var(--clay)]/50 bg-[var(--cream)] px-3 py-2 text-xs text-[var(--ink)]">
+                  {playoffR1FromTeamsError}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => void applyPlayoffR1FromTeams()}
+                disabled={teamActionBusy || Boolean(playoffR1FromTeamsError)}
+                className="rounded-full border-2 border-[var(--ink)] bg-[var(--clay)] px-4 py-2 text-sm font-bold text-[var(--cream)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Заполнить 1-й раунд сетки по списку пар
+              </button>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="rounded-2xl border-2 border-[var(--ink)] bg-[var(--surface)] p-6 shadow-[4px_4px_0_var(--ink)]">
         <h2 className="mb-4 font-[family-name:var(--font-display)] text-xl font-bold">

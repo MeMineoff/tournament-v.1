@@ -3,6 +3,15 @@ export type Group = {
   name: string
 }
 
+/** Пара (команда) в рамках одного турнира; в другом турнире тот же состав — новая строка. */
+export type Team = {
+  id: number
+  tournament_id: number
+  player_1_id: number
+  player_2_id: number
+  sort_index: number
+}
+
 export type Player = {
   id: number
   group_id: number

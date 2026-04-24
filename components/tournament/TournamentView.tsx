@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import type { MatchEnriched, Player, Tournament } from '@/lib/types'
+import type { MatchEnriched, Player, Team, Tournament } from '@/lib/types'
 import {
   computeFunStarsSumLeaderboard,
   computeStandings,
@@ -13,8 +13,8 @@ import {
 import { MatchModal } from '@/components/tournament/MatchModal'
 import { PlayoffBracket } from '@/components/tournament/PlayoffBracket'
 import {
-  chunkPairsFromParticipantIds,
   computeDoublesTeamRoundRobinStandings,
+  pairsForDoublesStandings,
 } from '@/lib/doublesTeamStandings'
 import { isDoublesParticipantType } from '@/lib/participantType'
 import type { TournamentArchiveStats } from '@/lib/aggregateStats'
@@ -44,6 +44,8 @@ function formatBlockLabel(tournament: Tournament) {
 type Props = {
   tournament: Tournament
   players: Player[]
+  /** Команды (пары) в рамках турнира; пусто — старая нарезка по participant_ids */
+  teams: Team[]
   matches: MatchEnriched[]
   clusterMismatch?: {
     tournamentGroupName: string
@@ -55,6 +57,7 @@ type Props = {
 export default function TournamentView({
   tournament,
   players,
+  teams,
   matches,
   clusterMismatch,
   archiveStats,
@@ -93,8 +96,8 @@ export default function TournamentView({
   }, [funRows])
 
   const doublesPairs = useMemo(
-    () => chunkPairsFromParticipantIds(tournament.participant_ids),
-    [tournament.participant_ids]
+    () => pairsForDoublesStandings(teams, tournament.participant_ids),
+    [teams, tournament.participant_ids]
   )
 
   const useDoublesTeamTable =
@@ -362,17 +365,15 @@ export default function TournamentView({
         <section role="tabpanel" aria-label="Турнирная таблица">
           {typeLabel === 'Пары' && doublesPairs.length === 0 && (
             <p className="mb-3 text-sm text-[var(--ink-muted)]">
-              Чтобы таблица шла <strong>по парам</strong>, в составе турнира должно быть{' '}
-              <strong>чётное</strong> число участников; в админке список id задаёт пары{' '}
-              <strong>по два подряд</strong> (1-й и 2-й = первая пара, 3-й и 4-й = вторая…).
+              Для <strong>командной</strong> таблицы: в админке турнира создайте пары в блоке
+              «Команды» <strong>или</strong> задайте чётный состав, два id подряд = одна пара.
               Сейчас показана персональная таблица.
             </p>
           )}
           {useDoublesTeamTable && teamStandingsRR.length > 0 && (
             <p className="mb-3 text-sm text-[var(--ink-muted)]">
-              Таблица по <strong>парам</strong>: в составе турнира два id подряд = одна команда. Очки
-              и матчи — на команду, не на каждого игрока отдельно. FUN ★ в столбце — сумма пары
-              (оба в этом турнире).
+              Таблица по <strong>командам</strong> турнира (строка = пара). Очки и матчи — на пару. FUN
+              ★ — сумма обоих в этом турнире.
             </p>
           )}
           <div className="overflow-hidden rounded-2xl border-2 border-[var(--ink)] bg-[var(--surface)] shadow-[6px_6px_0_var(--ink)]">

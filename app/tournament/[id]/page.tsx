@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { normalizeParticipantIds } from '@/lib/participantIds'
 import { supabase } from '@/lib/supabaseClient'
+import { fetchTournamentTeams } from '@/lib/tournamentTeams'
 import type {
   Group,
   Match,
@@ -84,18 +85,20 @@ export default async function TournamentPage({
         }
       : undefined
 
-  const { data: playersRaw } = await supabase
-    .from('players')
-    .select('*')
-    .eq('group_id', t.group_id)
-    .order('name')
-
-  const { data: matchesRaw } = await supabase
-    .from('matches')
-    .select('*')
-    .eq('tournament_id', tournamentId)
-    .order('round_index', { ascending: true })
-    .order('bracket_order', { ascending: true })
+  const [{ data: playersRaw }, { data: matchesRaw }, teams] = await Promise.all([
+    supabase
+      .from('players')
+      .select('*')
+      .eq('group_id', t.group_id)
+      .order('name'),
+    supabase
+      .from('matches')
+      .select('*')
+      .eq('tournament_id', tournamentId)
+      .order('round_index', { ascending: true })
+      .order('bracket_order', { ascending: true }),
+    fetchTournamentTeams(supabase, tournamentId),
+  ])
 
   const players = (playersRaw ?? []) as Player[]
   const matches = (matchesRaw ?? []).map((r) => normalizeMatch(r as Record<string, unknown>))
@@ -127,6 +130,7 @@ export default async function TournamentPage({
     <TournamentView
       tournament={t}
       players={players}
+      teams={teams}
       matches={enriched}
       clusterMismatch={clusterMismatch}
       archiveStats={archiveStats}

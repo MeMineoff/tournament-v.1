@@ -1,8 +1,8 @@
 import { normalizeParticipantIds } from '@/lib/participantIds'
-import type { Match, Player } from '@/lib/types'
+import type { Match, Player, Team } from '@/lib/types'
 import { isRoundRobinMatch } from '@/lib/stats'
 
-/** Два подряд id в participant_ids = одна пара (как в админке). */
+/** Два подряд id в participant_ids = одна пара (как в админке) — fallback без таблицы teams. */
 export function chunkPairsFromParticipantIds(
   raw: unknown
 ): [number, number][] {
@@ -13,6 +13,22 @@ export function chunkPairsFromParticipantIds(
     out.push([ids[i]!, ids[i + 1]!])
   }
   return out
+}
+
+/**
+ * Приоритет: явные команды из БД. Иначе — нарезка participant_ids.
+ */
+export function pairsForDoublesStandings(
+  teams: Team[] | null | undefined,
+  rawParticipantIds: unknown
+): [number, number][] {
+  if (teams && teams.length > 0) {
+    return teams
+      .slice()
+      .sort((a, b) => a.sort_index - b.sort_index)
+      .map((t) => [t.player_1_id, t.player_2_id] as [number, number])
+  }
+  return chunkPairsFromParticipantIds(rawParticipantIds)
 }
 
 export type DoublesTeamStandingRow = {

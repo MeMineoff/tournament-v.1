@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { normalizeParticipantIds } from '@/lib/participantIds'
 import { supabase } from '@/lib/supabaseClient'
+import { fetchTournamentTeams } from '@/lib/tournamentTeams'
 import type { Match, Player, Tournament } from '@/lib/types'
 import { TournamentAdminForm } from './TournamentAdminForm'
 
@@ -65,7 +66,7 @@ export default async function AdminTournamentPage({
 
   const tournament = normalizeTournament(tourRaw as Tournament & Record<string, unknown>)
 
-  const [{ data: playersRaw }, { data: matchesRaw }] = await Promise.all([
+  const [{ data: playersRaw }, { data: matchesRaw }, teams] = await Promise.all([
     supabase
       .from('players')
       .select('*')
@@ -77,6 +78,7 @@ export default async function AdminTournamentPage({
       .eq('tournament_id', tournamentId)
       .order('round_index', { ascending: true })
       .order('bracket_order', { ascending: true }),
+    fetchTournamentTeams(supabase, tournamentId),
   ])
 
   const players = (playersRaw ?? []).map((r) =>
@@ -98,6 +100,7 @@ export default async function AdminTournamentPage({
         tournament={tournament}
         groupPlayers={players}
         initialMatches={matches}
+        initialTeams={teams}
       />
     </main>
   )

@@ -862,23 +862,24 @@ export function TournamentAdminForm({
   async function deleteMatch(id: number) {
     if (!confirm('Удалить этот матч?')) return
     setMsg(null)
-    const { data: children, error: chErr } = await supabase
-      .from('matches')
-      .select('id')
-      .eq('tournament_id', tournament.id)
-      .or(`parent_a_match_id.eq.${id},parent_b_match_id.eq.${id}`)
-      .limit(1)
-    if (chErr) {
-      setMsg(chErr.message)
-      return
-    }
-    if (children?.length) {
-      setMsg('Нельзя удалить: на матч ссылается следующий раунд.')
-      return
-    }
-    const { error } = await supabase.from('matches').delete().eq('id', id)
-    if (error) {
-      setMsg(error.message)
+    const res = await fetch('/api/admin/matches', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, tournament_id: tournament.id }),
+      credentials: 'same-origin',
+    })
+    const payload = (await res.json().catch(() => null)) as
+      | { ok: true; deletedId: number }
+      | { ok: false; error?: string; hint?: string }
+      | null
+    if (!res.ok || !payload || payload.ok !== true) {
+      const p = payload && typeof payload === 'object' ? payload : null
+      const err =
+        p && 'error' in p && p.error
+          ? p.error
+          : `HTTP ${res.status}`
+      const hint = p && 'hint' in p && p.hint ? p.hint : ''
+      setMsg([err, hint].filter(Boolean).join('\n\n'))
       return
     }
     await refreshAll()

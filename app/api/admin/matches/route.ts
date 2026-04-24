@@ -12,6 +12,10 @@ export const runtime = 'nodejs'
 type InsertBody = {
   row?: Record<string, unknown>
 }
+type DeleteBody = {
+  id?: unknown
+  tournament_id?: unknown
+}
 
 const CONFIG_HINT =
   'В Vercel (Settings → Environment Variables): SUPABASE_SERVICE_ROLE_KEY = legacy JWT «service_role» (Settings → API → Legacy API Keys) ИЛИ secret sb_secret_… (API Keys). Схема `tournament` в Settings → Data API → Exposed schemas. После смены env — Redeploy. Миграции прав: supabase/migrations/20260425120000_matches_grants.sql и supabase/migrations/20260425191500_service_role_tournament_schema_grants.sql'
@@ -101,6 +105,73 @@ export async function POST(req: Request) {
       },
       { status: 500 }
     )
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    return NextResponse.json(
+      { ok: false, error: `Внутренняя ошибка: ${message}` },
+      { status: 500 }
+    )
+  }
+}
+
+/** Удаление матча через сервер (устойчивее, чем прямой клиентский запрос к Supabase). */
+export async function DELETE(req: Request) {
+  try {
+    let body: DeleteBody
+    try {
+      body = (await req.json()) as DeleteBody
+    } catch {
+      return badRequest('Некорректный JSON.')
+    }
+
+    const id = Number(body.id)
+    const tournamentId = Number(body.tournament_id)
+    if (!Number.isFinite(id) || id <= 0) {
+      return badRequest('Передайте id матча (число).')
+    }
+    if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+      return badRequest('Передайте tournament_id (число).')
+    }
+
+    const sb = getSupabaseAdminForServer()
+    const { data: children, error: childErr } = await sb
+      .from('matches')
+      .select('id')
+      .eq('tournament_id', tournamentId)
+      .or(`parent_a_match_id.eq.${id},parent_b_match_id.eq.${id}`)
+      .limit(1)
+
+    if (childErr) {
+      return NextResponse.json(
+        { ok: false, error: childErr.message, hint: !hasServiceRoleInEnv() ? CONFIG_HINT : undefined },
+        { status: 500 }
+      )
+    }
+    if (children?.length) {
+      return NextResponse.json(
+        { ok: false, error: 'Нельзя удалить: на матч ссылается следующий раунд.' },
+        { status: 409 }
+      )
+    }
+
+    const { data: deletedRows, error: delErr } = await sb
+      .from('matches')
+      .delete()
+      .eq('id', id)
+      .eq('tournament_id', tournamentId)
+      .select('id')
+
+    if (delErr) {
+      return NextResponse.json(
+        { ok: false, error: delErr.message, hint: !hasServiceRoleInEnv() ? CONFIG_HINT : undefined },
+        { status: 500 }
+      )
+    }
+    if (!deletedRows || deletedRows.length === 0) {
+      return NextResponse.json({ ok: false, error: 'Матч не найден или уже удалён.' }, { status: 404 })
+    }
+
+    return NextResponse.json({ ok: true, deletedId: id, via: 'supabase-js' })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return NextResponse.json(

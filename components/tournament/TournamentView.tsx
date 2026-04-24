@@ -403,25 +403,27 @@ export default function TournamentView({
                           <td className="px-4 py-3 font-mono font-bold">
                             {idx + 1}
                           </td>
-                          <td className="px-4 py-3 font-bold">
-                            <div className="flex min-w-0 flex-col gap-1">
+                          <td className="px-4 py-3">
+                            <div className="flex min-w-0 flex-col gap-1.5">
                               <Link
                                 href={`/player/${row.playerA.id}`}
-                                className="inline-flex min-w-0 items-center transition hover:underline"
+                                className="inline-flex min-w-0 items-center gap-2 font-bold text-[var(--ink)] transition hover:underline"
                               >
-                                <span className="mr-2 text-xl">
+                                <span className="shrink-0 text-xl leading-none">
                                   {row.playerA.avatar_emoji}
                                 </span>
-                                <span className="truncate">{row.playerA.name}</span>
+                                <span className="min-w-0 truncate">
+                                  {row.playerA.name}
+                                </span>
                               </Link>
                               <Link
                                 href={`/player/${row.playerB.id}`}
-                                className="inline-flex min-w-0 items-center text-[var(--ink-muted)] transition hover:underline"
+                                className="inline-flex min-w-0 items-center gap-2 font-bold text-[var(--ink)] transition hover:underline"
                               >
-                                <span className="mr-2 text-lg">
+                                <span className="shrink-0 text-xl leading-none">
                                   {row.playerB.avatar_emoji}
                                 </span>
-                                <span className="truncate text-sm">
+                                <span className="min-w-0 truncate">
                                   {row.playerB.name}
                                 </span>
                               </Link>

@@ -778,17 +778,11 @@ export function TournamentAdminForm({
       }
     }
 
-    const { data: boRows, error: boErr } = await supabase
-      .from('matches')
-      .select('bracket_order')
-      .eq('tournament_id', tournament.id)
-    if (boErr) {
-      setMsg(boErr.message)
-      return
-    }
+    // Не блокируем добавление матча сетевой ошибкой чтения Supabase с клиента
+    // (например ERR_CONNECTION_RESET): порядок можно безопасно оценить по локальному state.
     const maxBo = Math.max(
       0,
-      ...(boRows ?? []).map((r) => Number((r as { bracket_order?: number }).bracket_order ?? 0))
+      ...matches.map((m) => Number((m as { bracket_order?: number }).bracket_order ?? 0))
     )
 
     const row = doubles

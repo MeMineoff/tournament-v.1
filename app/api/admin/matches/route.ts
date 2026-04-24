@@ -13,84 +13,99 @@ type InsertBody = {
   row?: Record<string, unknown>
 }
 
+const CONFIG_HINT =
+  'В Vercel (Settings → Environment Variables): SUPABASE_SERVICE_ROLE_KEY = legacy JWT «service_role» (Settings → API → Legacy API Keys) ИЛИ secret sb_secret_… (API Keys). Схема `tournament` в Settings → Data API → Exposed schemas. После смены env — Redeploy. Миграция прав: supabase/migrations/20260425120000_matches_grants.sql'
+
 function badRequest(message: string) {
   return NextResponse.json({ ok: false, error: message }, { status: 400 })
 }
 
 /**
- * Вставка матча круга. Сначала PostgREST fetch (лучше с новыми `sb_secret_*` и схемой `tournament`),
- * при сбое — @supabase/supabase-js.
+ * Вставка матча круга. Сначала @supabase/supabase-js (корректно обходит API Gateway
+ * для новых `sb_secret_*` и legacy `service_role`), при сбое — PostgREST fetch.
  */
 export async function POST(req: Request) {
-  let body: InsertBody
   try {
-    body = (await req.json()) as InsertBody
-  } catch {
-    return badRequest('Некорректный JSON.')
-  }
+    let body: InsertBody
+    try {
+      body = (await req.json()) as InsertBody
+    } catch {
+      return badRequest('Некорректный JSON.')
+    }
 
-  const row = body.row
-  if (!row || typeof row !== 'object') {
-    return badRequest('Передайте объект row.')
-  }
-  const tid = Number((row as { tournament_id?: unknown }).tournament_id)
-  if (!Number.isFinite(tid) || tid <= 0) {
-    return badRequest('В row должен быть tournament_id (число).')
-  }
+    const row = body.row
+    if (!row || typeof row !== 'object') {
+      return badRequest('Передайте объект row.')
+    }
+    const tid = Number((row as { tournament_id?: unknown }).tournament_id)
+    if (!Number.isFinite(tid) || tid <= 0) {
+      return badRequest('В row должен быть tournament_id (число).')
+    }
 
-  const clean = JSON.parse(JSON.stringify(row)) as Record<string, unknown>
+    const clean = JSON.parse(JSON.stringify(row)) as Record<string, unknown>
 
-  let restErrorMessage: string | null = null
-  if (hasElevatedSupabaseKey()) {
-    const { data, error: restErr } = await restInsertOneMatch(clean)
-    if (!restErr && data != null) {
+    const sb = getSupabaseAdminForServer()
+    const {
+      data: sdkData,
+      error: sdkError,
+    } = await sb.from('matches').insert(clean).select('*').single()
+
+    if (!sdkError && sdkData) {
       return NextResponse.json({
         ok: true,
-        match: normalizeMatchRow(data as Record<string, unknown>),
-        via: 'rest',
+        match: normalizeMatchRow(sdkData as Record<string, unknown>),
+        via: 'supabase-js',
       })
     }
-    if (restErr) {
-      restErrorMessage = restErr.message
+
+    let restErrorMessage: string | null = null
+    if (hasElevatedSupabaseKey()) {
+      const { data: restData, error: restErr } = await restInsertOneMatch(clean)
+      if (!restErr && restData != null) {
+        return NextResponse.json({
+          ok: true,
+          match: normalizeMatchRow(restData as Record<string, unknown>),
+          via: 'rest',
+        })
+      }
+      if (restErr) {
+        restErrorMessage = restErr.message
+      }
     }
-  }
 
-  const sb = getSupabaseAdminForServer()
-  const { data, error } = await sb
-    .from('matches')
-    .insert(clean)
-    .select('*')
-    .single()
+    if (sdkError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: sdkError.message,
+          restError: restErrorMessage ?? undefined,
+          hint: !hasServiceRoleInEnv()
+            ? CONFIG_HINT
+            : [sdkError.message, restErrorMessage && `PostgREST: ${restErrorMessage}`]
+                .filter(Boolean)
+                .join(' · '),
+          code: sdkError.code,
+          details: sdkError.details,
+          via: 'supabase-js',
+        },
+        { status: 500 }
+      )
+    }
 
-  if (error) {
     return NextResponse.json(
       {
         ok: false,
-        error: error.message,
+        error: 'INSERT не вернул строку',
         restError: restErrorMessage ?? undefined,
-        hint: !hasServiceRoleInEnv()
-          ? 'В Vercel (Settings → Environment Variables) и локально в .env.local: SUPABASE_SERVICE_ROLE_KEY = «service_role» с вкладки Legacy API Keys, ИЛИ SUPABASE_SECRET_KEY = Secret key (sb_secret_…). Схема tournament должна быть в Exposed Schemas (Settings → Data API). Либо миграция: supabase/migrations/20260425120000_matches_grants.sql'
-          : restErrorMessage
-            ? `PostgREST: ${restErrorMessage} · SDK: ${error.message}`
-            : undefined,
-        code: error.code,
-        details: error.details,
-        via: 'supabase-js',
+        hint: CONFIG_HINT,
       },
       { status: 500 }
     )
-  }
-
-  if (!data) {
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
     return NextResponse.json(
-      { ok: false, error: 'INSERT не вернул строку' },
+      { ok: false, error: `Внутренняя ошибка: ${message}` },
       { status: 500 }
     )
   }
-
-  return NextResponse.json({
-    ok: true,
-    match: normalizeMatchRow(data as Record<string, unknown>),
-    via: 'supabase-js',
-  })
 }

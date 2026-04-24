@@ -16,6 +16,7 @@ import {
   parseClusterSelection,
 } from '@/lib/cluster'
 import { deleteGroupCascade, deleteTournamentCascade } from '@/lib/adminDelete'
+import { appendBrowserSupabaseNetworkHint } from '@/lib/supabaseNetworkHint'
 
 export type AdminViewProps = {
   initialGroups: Group[]
@@ -59,7 +60,7 @@ function formatSupabaseError(err: {
   if (err.details) parts.push(`Детали: ${err.details}`)
   if (err.hint) parts.push(`Подсказка: ${err.hint}`)
   if (err.code) parts.push(`Код: ${err.code}`)
-  return parts.join('\n')
+  return appendBrowserSupabaseNetworkHint(parts.join('\n'))
 }
 
 function formatUnknownSupabaseErr(err: unknown): string {
@@ -71,7 +72,9 @@ function formatUnknownSupabaseErr(err: unknown): string {
   ) {
     return formatSupabaseError(err as Parameters<typeof formatSupabaseError>[0])
   }
-  if (err instanceof Error) return err.message
+  if (err instanceof Error) {
+    return appendBrowserSupabaseNetworkHint(err.message)
+  }
   return 'Ошибка при создании матчей'
 }
 

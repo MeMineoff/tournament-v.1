@@ -4,31 +4,43 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 type Db = SupabaseClient<any, 'public', 'tournament'>
 
 /**
- * Удаляет все матчи турнира (с отвязкой parent_* от сетки) и сам турнир.
+ * Удаляет все матчи турнира (с отвязкой parent_* от сетки), пары `teams`, затем сам турнир.
+ * `teams` удаляем явно: иначе при FK team→tournament без CASCADE удаление `tournaments` падает.
  */
 export async function deleteTournamentCascade(
   supabase: Db,
   tournamentId: number
 ): Promise<string | null> {
+  const tid = Number(tournamentId)
+  if (!Number.isFinite(tid) || tid <= 0) {
+    return 'Некорректный id турнира.'
+  }
+
   const { error: u1 } = await supabase
     .from('matches')
     .update({
       parent_a_match_id: null,
       parent_b_match_id: null,
     })
-    .eq('tournament_id', tournamentId)
+    .eq('tournament_id', tid)
   if (u1) return u1.message
 
   const { error: d1 } = await supabase
     .from('matches')
     .delete()
-    .eq('tournament_id', tournamentId)
+    .eq('tournament_id', tid)
   if (d1) return d1.message
+
+  const { error: dTeams } = await supabase
+    .from('teams')
+    .delete()
+    .eq('tournament_id', tid)
+  if (dTeams) return dTeams.message
 
   const { error: d2 } = await supabase
     .from('tournaments')
     .delete()
-    .eq('id', tournamentId)
+    .eq('id', tid)
   if (d2) return d2.message
   return null
 }

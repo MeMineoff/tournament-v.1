@@ -441,8 +441,10 @@ export function AdminView({
       setMsg(err)
       return
     }
+    setEditingTournamentId((cur) => (cur === id ? null : cur))
     setMsg('Турнир удалён')
-    void loadGroupData()
+    await loadGroupData()
+    router.refresh()
   }
 
   async function removeGroup(id: number) {

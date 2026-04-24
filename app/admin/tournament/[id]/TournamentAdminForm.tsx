@@ -707,7 +707,10 @@ export function TournamentAdminForm({
   async function addRoundRobinMatch(e: React.FormEvent) {
     e.preventDefault()
     setMsg(null)
-    if (tournament.format !== 'round_robin') return
+    if (tournament.format !== 'round_robin') {
+      setMsg('Добавить матч круга можно только у турнира в формате «круг». Для плей-офф используйте сетку и кнопки заполнения выше.')
+      return
+    }
     const pids = participantIdsOrdered
     let doublesRowTeams:
       | { a1: number; a2: number; b1: number; b2: number }
@@ -811,11 +814,15 @@ export function TournamentAdminForm({
           parent_b_match_id: null,
         }
 
-    const resIns = await fetch('/api/admin/matches', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ row }),
-    })
+    const resIns = await fetch(
+      new URL('/api/admin/matches', window.location.origin).toString(),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row }),
+        credentials: 'same-origin',
+      }
+    )
     const insPayload = (await resIns.json().catch(() => null)) as
       | { ok: true; match: Match; via?: string }
       | { ok: false; error?: string; hint?: string; restError?: string; details?: string }
@@ -1239,6 +1246,15 @@ export function TournamentAdminForm({
         <h2 className="mb-4 font-[family-name:var(--font-display)] text-xl font-bold">
           Матчи турнира
         </h2>
+
+        {tournament.format === 'playoff' && (
+          <p className="mb-4 text-sm text-[var(--ink-muted)]">
+            <strong>Плей-офф</strong> — сетка и заполнение ячеек в таблице ниже. Запрос{' '}
+            <code className="rounded bg-[var(--cream)] px-1 font-mono">POST /api/admin/matches</code>{' '}
+            (добавить матч круга) на этой странице не вызывается; он бывает только в
+            круговом турнире, в блоке «Добавить матч (круг)».
+          </p>
+        )}
 
         {tournament.format === 'round_robin' && (
           <div className="mb-8 space-y-4">

@@ -1,3 +1,4 @@
+import { getGroupsForNav } from '@/lib/cachedGroups'
 import { parseClusterSelection, type ClusterSelection } from '@/lib/cluster'
 import type { Group, Player, Tournament } from '@/lib/types'
 import type { AppSupabaseClient } from '@/lib/supabaseClient'
@@ -112,7 +113,7 @@ export async function getAdminServerInitial(
   supabase: AppSupabaseClient,
   rawClusterCookie: string | undefined
 ): Promise<AdminServerInit> {
-  const { data: g, error: gErr } = await supabase.from('groups').select('*').order('id')
+  const { groups: list, error: gErr } = await getGroupsForNav()
   if (gErr) {
     return {
       groups: [],
@@ -124,7 +125,6 @@ export async function getAdminServerInitial(
       initialTournaments: [] as Tournament[],
     }
   }
-  const list = (g ?? []) as Group[]
   if (list.length === 0) {
     return {
       groups: list,

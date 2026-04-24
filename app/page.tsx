@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
+import { getGroupsForNav } from '@/lib/cachedGroups'
 import { normalizeParticipantIds } from '@/lib/participantIds'
 import { supabase } from '@/lib/supabaseClient'
 import type { Group, Match, Player, Tournament } from '@/lib/types'
@@ -62,11 +63,10 @@ function normalizeMatch(row: Record<string, unknown>): Match {
 }
 
 export default async function Home() {
-  const [{ data: groupsRaw }, cookieStore] = await Promise.all([
-    supabase.from('groups').select('*').order('id'),
+  const [{ groups }, cookieStore] = await Promise.all([
+    getGroupsForNav(),
     cookies(),
   ])
-  const groups = (groupsRaw ?? []) as Group[]
   const clusterSel = parseClusterSelection(
     groups,
     cookieStore.get(CLUSTER_COOKIE_NAME)?.value

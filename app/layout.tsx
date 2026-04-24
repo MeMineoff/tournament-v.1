@@ -1,8 +1,7 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 import { NavShell } from '@/components/NavShell'
-import { supabase } from '@/lib/supabaseClient'
-import type { Group } from '@/lib/types'
+import { getGroupsForNav } from '@/lib/cachedGroups'
 import { CLUSTER_COOKIE_NAME, parseClusterSelection } from '@/lib/cluster'
 import './font-face.css'
 import './globals.css'
@@ -17,11 +16,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const [{ data: groupsRaw }, cookieStore] = await Promise.all([
-    supabase.from('groups').select('*').order('id'),
+  const [{ groups }, cookieStore] = await Promise.all([
+    getGroupsForNav(),
     cookies(),
   ])
-  const groups = (groupsRaw ?? []) as Group[]
   const clusterSelection = parseClusterSelection(
     groups,
     cookieStore.get(CLUSTER_COOKIE_NAME)?.value

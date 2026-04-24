@@ -250,6 +250,7 @@ export function AdminView({
       return
     }
     setCreatingTournament(true)
+    setMsg('⏳ Создаём турнир (запрос к базе)…')
     let tid: number | null = null
 
     try {
@@ -283,6 +284,7 @@ export function AdminView({
       tid = created!.id as number
 
       if (tFormat === 'playoff') {
+        setMsg('⏳ Создаём сетку плей-офф (несколько шагов в БД)…')
         const { rows, parentLinks } = buildPlayoffBracketSkeleton(
           tid,
           playoffSize,
@@ -311,7 +313,14 @@ export function AdminView({
       setMsg(
         `Турнир создан 🏆${matchNote} Состав и матчи: /admin/tournament/${tid}`
       )
-      void loadGroupData()
+      void loadGroupData().catch((e) => {
+        console.error('[admin] loadGroupData после создания турнира', e)
+        setMsg((m) =>
+          m
+            ? `${m}\n\nСписок турниров не обновился — обновите страницу.`
+            : 'Список не обновился — обновите страницу.'
+        )
+      })
     } catch (err: unknown) {
       console.error('[admin createTournament] этап матчей / сетки', err)
       const detail = formatUnknownSupabaseErr(err)

@@ -817,19 +817,19 @@ export function TournamentAdminForm({
       body: JSON.stringify({ row }),
     })
     const insPayload = (await resIns.json().catch(() => null)) as
-      | { ok: true; match: Match }
-      | { ok: false; error?: string; hint?: string; details?: string }
+      | { ok: true; match: Match; via?: string }
+      | { ok: false; error?: string; hint?: string; restError?: string; details?: string }
       | null
     if (!resIns.ok || !insPayload || insPayload.ok !== true) {
+      const p = insPayload && typeof insPayload === 'object' ? insPayload : null
       const err =
-        insPayload && 'error' in insPayload && insPayload.error
-          ? insPayload.error
+        p && 'error' in p && p.error
+          ? p.error
           : `HTTP ${resIns.status}`
-      const hint =
-        insPayload && 'hint' in insPayload && insPayload.hint
-          ? insPayload.hint
-          : ''
-      setMsg(hint ? `${err}\n\n${hint}` : err)
+      const restE = p && 'restError' in p && p.restError ? p.restError : ''
+      const hint = p && 'hint' in p && p.hint ? p.hint : ''
+      const parts = [err, restE && `PostgREST: ${restE}`, hint].filter(Boolean)
+      setMsg(parts.join('\n\n'))
       return
     }
     const inserted = insPayload.match

@@ -10,6 +10,7 @@ import {
   fetchTournamentTeams,
   getTournamentPlayerIdsFromTeams,
   getPlayoffLeafRoundMatches,
+  normalizeTeamRow,
   teamDisplayName,
 } from '@/lib/tournamentTeams'
 import type { Match, Player, Team, Tournament } from '@/lib/types'
@@ -146,14 +147,25 @@ export function TournamentAdminForm({
     return m
   }, [teamsOrdered])
 
+  /** Игроки, уже внесённые в существующие пары (для селектов «добавить команду»). */
+  const playerIdsInExistingDoublesTeams = useMemo(() => {
+    const s = new Set<number>()
+    for (const t of teamsOrdered) {
+      s.add(Number(t.player_1_id))
+      s.add(Number(t.player_2_id))
+    }
+    return s
+  }, [teamsOrdered])
+
   const playoffR1FromTeamsError = useMemo(() => {
     if (!doubles || tournament.format !== 'playoff') return null
     return canApplyTeamsToPlayoffR1(tournament, teamsOrdered, matches)
   }, [doubles, tournament, teamsOrdered, matches])
 
+  /** Только при смене турнира: нельзя синхать на каждое обновление initialTeams (router.refresh) — иначе затирается свежий список после createTeam, пока RSC кэш не догонит БД. */
   useEffect(() => {
     setTeams(initialTeams)
-  }, [initialTeams])
+  }, [initialTournament.id])
 
   useEffect(() => {
     if (!doubles) return
@@ -312,6 +324,11 @@ export function TournamentAdminForm({
       )
       return
     }
+    const created = normalizeTeamRow(payload.team as Record<string, unknown>)
+    setTeams((prev) => {
+      if (prev.some((t) => t.id === created.id)) return prev
+      return [...prev, created].sort((a, b) => a.sort_index - b.sort_index)
+    })
     setNewTeamP1('')
     setNewTeamP2('')
     setNewTeamName('')
@@ -1063,15 +1080,23 @@ export function TournamentAdminForm({
                 className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
               >
                 <option value="">—</option>
-                {groupPlayers.map((p) => (
-                  <option
-                    key={p.id}
-                    value={String(p.id)}
-                    disabled={optionTaken(Number(p.id), newTeamP1, [newTeamP2])}
-                  >
-                    {p.avatar_emoji} {p.name}
-                  </option>
-                ))}
+                {groupPlayers.map((p) => {
+                  const id = Number(p.id)
+                  const inOtherPair = playerIdsInExistingDoublesTeams.has(id)
+                  return (
+                    <option
+                      key={p.id}
+                      value={String(p.id)}
+                      disabled={
+                        inOtherPair ||
+                        optionTaken(id, newTeamP1, [newTeamP2])
+                      }
+                    >
+                      {p.avatar_emoji} {p.name}
+                      {inOtherPair ? ' (уже в паре)' : ''}
+                    </option>
+                  )
+                })}
               </select>
             </label>
             <label className="text-sm font-bold">
@@ -1085,15 +1110,23 @@ export function TournamentAdminForm({
                 className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
               >
                 <option value="">—</option>
-                {groupPlayers.map((p) => (
-                  <option
-                    key={p.id}
-                    value={String(p.id)}
-                    disabled={optionTaken(Number(p.id), newTeamP2, [newTeamP1])}
-                  >
-                    {p.avatar_emoji} {p.name}
-                  </option>
-                ))}
+                {groupPlayers.map((p) => {
+                  const id = Number(p.id)
+                  const inOtherPair = playerIdsInExistingDoublesTeams.has(id)
+                  return (
+                    <option
+                      key={p.id}
+                      value={String(p.id)}
+                      disabled={
+                        inOtherPair ||
+                        optionTaken(id, newTeamP2, [newTeamP1])
+                      }
+                    >
+                      {p.avatar_emoji} {p.name}
+                      {inOtherPair ? ' (уже в паре)' : ''}
+                    </option>
+                  )
+                })}
               </select>
             </label>
             <label className="text-sm font-bold sm:col-span-full">

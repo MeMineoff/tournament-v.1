@@ -64,6 +64,23 @@ export async function POST(req: Request) {
     if (player1Id === player2Id) {
       return badRequest('Игроки в команде должны быть разными.')
     }
+    const { data: teamConflict, error: conflictErr } = await supabase
+      .from('teams')
+      .select('id')
+      .eq('tournament_id', tournamentId)
+      .or(
+        `player_1_id.eq.${player1Id},player_2_id.eq.${player1Id},player_1_id.eq.${player2Id},player_2_id.eq.${player2Id}`
+      )
+      .limit(1)
+    if (conflictErr) {
+      return NextResponse.json(
+        { ok: false, error: conflictErr.message },
+        { status: 500 }
+      )
+    }
+    if (teamConflict && teamConflict.length > 0) {
+      return badRequest('Один из игроков уже состоит в другой команде этого турнира.')
+    }
     const { data: sortRows, error: sortErr } = await supabase
       .from('teams')
       .select('sort_index')

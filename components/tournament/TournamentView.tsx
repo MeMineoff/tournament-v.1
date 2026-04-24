@@ -23,18 +23,6 @@ import { teamDisplayName } from '@/lib/tournamentTeams'
 
 type Tab = 'matches' | 'fun' | 'table'
 
-function formatDate(d: string) {
-  try {
-    return new Intl.DateTimeFormat('ru-RU', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    }).format(new Date(d))
-  } catch {
-    return d
-  }
-}
-
 function formatBlockLabel(tournament: Tournament) {
   if (tournament.format === 'playoff') {
     return { label: 'Плей-офф', emoji: '🏆' }
@@ -44,6 +32,8 @@ function formatBlockLabel(tournament: Tournament) {
 
 type Props = {
   tournament: Tournament
+  /** Подпись к дате с сервера — без Intl в клиенте при первом рендере (гидрация). */
+  scheduledDateLabel: string
   players: Player[]
   /** Команды (пары) в рамках турнира; пусто — старая нарезка по participant_ids */
   teams: Team[]
@@ -57,6 +47,7 @@ type Props = {
 
 export default function TournamentView({
   tournament,
+  scheduledDateLabel,
   players,
   teams,
   matches,
@@ -188,7 +179,7 @@ export default function TournamentView({
             </span>
             <span className="inline-flex items-center gap-2 rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-3 py-2 text-sm font-bold shadow-[3px_3px_0_var(--ink)]">
               <span>📅</span>
-              {formatDate(tournament.scheduled_date)}
+              {scheduledDateLabel}
             </span>
           </div>
         </div>

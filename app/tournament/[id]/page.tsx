@@ -18,6 +18,7 @@ import TournamentView from '@/components/tournament/TournamentView'
 import { CLUSTER_COOKIE_NAME, parseClusterSelection } from '@/lib/cluster'
 import { computeTournamentArchiveStats } from '@/lib/aggregateStats'
 import { tournamentPlayers } from '@/lib/stats'
+import { formatDateRuLong } from '@/lib/formatDateRu'
 
 type Params = { id: string }
 
@@ -141,6 +142,7 @@ export default async function TournamentPage({
   return (
     <TournamentView
       tournament={t}
+      scheduledDateLabel={formatDateRuLong(t.scheduled_date)}
       players={players}
       teams={teams}
       matches={enriched}

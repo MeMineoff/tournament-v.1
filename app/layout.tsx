@@ -26,8 +26,11 @@ export default async function RootLayout({
   )
 
   return (
-    <html lang="ru" className="h-full antialiased">
-      <body className="min-h-full flex flex-col font-[family-name:var(--font-body)] text-[var(--ink)]">
+    <html lang="ru" className="h-full antialiased" suppressHydrationWarning>
+      <body
+        className="min-h-full flex flex-col font-[family-name:var(--font-body)] text-[var(--ink)]"
+        suppressHydrationWarning
+      >
         <div className="noise-overlay pointer-events-none fixed inset-0 z-[5] opacity-[0.07] mix-blend-multiply" />
         <NavShell groups={groups} clusterSelection={clusterSelection} />
         {children}

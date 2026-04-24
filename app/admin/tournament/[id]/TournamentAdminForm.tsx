@@ -396,6 +396,8 @@ export function TournamentAdminForm({
   async function updateParticipantIds(next: number[]) {
     setSavingPid(true)
     setMsg(null)
+    // Сразу отражаем локально, чтобы кнопка выглядела «живой», даже если сеть медленная.
+    setTournament((prev) => ({ ...prev, participant_ids: next }))
     try {
       const res = await fetch('/api/admin/tournaments', {
         method: 'PATCH',
@@ -406,10 +408,14 @@ export function TournamentAdminForm({
         }),
       })
       const payload = (await res.json().catch(() => null)) as
-        | { ok: true; tournament: { participant_ids?: unknown } }
+        | { ok: true; participantIds?: number[] }
         | { ok: false; error?: string }
         | null
       if (!res.ok || !payload || payload.ok !== true) {
+        setTournament((prev) => ({
+          ...prev,
+          participant_ids: normalizeParticipantIds(tournament.participant_ids),
+        }))
         setSavingPid(false)
         setMsg(
           payload && 'error' in payload && payload.error
@@ -419,6 +425,10 @@ export function TournamentAdminForm({
         return
       }
     } catch (e: unknown) {
+      setTournament((prev) => ({
+        ...prev,
+        participant_ids: normalizeParticipantIds(tournament.participant_ids),
+      }))
       setSavingPid(false)
       setMsg(e instanceof Error ? e.message : 'Не удалось обновить состав турнира.')
       return

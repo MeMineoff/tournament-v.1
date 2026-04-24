@@ -146,19 +146,16 @@ export async function PATCH(req: Request) {
     return badRequest('В participantIds должны быть только числовые id > 0.')
   }
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('tournaments')
     .update({ participant_ids: participantIds })
     .eq('id', tournamentId)
-    .select('id, participant_ids')
-    .single()
-
-  if (error || !data) {
+  if (error) {
     return NextResponse.json(
       { ok: false, error: error?.message ?? 'Не удалось обновить состав турнира.' },
       { status: 500 }
     )
   }
 
-  return NextResponse.json({ ok: true, tournament: data })
+  return NextResponse.json({ ok: true, participantIds })
 }

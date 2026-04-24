@@ -220,7 +220,11 @@ export function TournamentAdminForm({
   }
 
   async function refreshAll() {
-    const [{ data: tr }, { data: mr }, freshTeams] = await Promise.all([
+    const [
+      { data: tr, error: trErr },
+      { data: mr, error: mErr },
+      freshTeams,
+    ] = await Promise.all([
       supabase.from('tournaments').select('*').eq('id', tournament.id).single(),
       supabase
         .from('matches')
@@ -230,14 +234,22 @@ export function TournamentAdminForm({
         .order('bracket_order', { ascending: true }),
       fetchTournamentTeams(supabase, tournament.id),
     ])
-    if (tr) {
+    if (trErr) {
+      setMsg(`Турнир: ${trErr.message}`)
+    } else if (tr) {
       const row = tr as Tournament & { participant_ids?: unknown }
       setTournament({
         ...row,
         participant_ids: normalizeParticipantIds(row.participant_ids),
       } as Tournament)
     }
-    if (mr) setMatches(mr as Match[])
+    if (mErr) {
+      setMsg(
+        `Список матчей: ${mErr.message} (проверьте GRANT/RLS в Supabase на tournament.matches, см. supabase/migrations/20260425120000_matches_grants.sql).`
+      )
+    } else if (mr) {
+      setMatches(mr as Match[])
+    }
     setTeams(freshTeams)
     router.refresh()
   }
@@ -372,13 +384,14 @@ export function TournamentAdminForm({
   async function saveTeamName(teamId: number) {
     setMsg(null)
     setTeamActionBusy(true)
+    const newName = editingTeamName.trim() || null
     const res = await fetch('/api/admin/tournaments', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'updateTeam',
         teamId,
-        name: editingTeamName.trim() || null,
+        name: newName,
       }),
     })
     const payload = (await res.json().catch(() => null)) as
@@ -394,6 +407,10 @@ export function TournamentAdminForm({
       )
       return
     }
+    const updated = normalizeTeamRow(payload.team as Record<string, unknown>)
+    setTeams((prev) =>
+      prev.map((t) => (t.id === updated.id ? updated : t))
+    )
     setEditingTeamId(null)
     setEditingTeamName('')
     setMsg('Название команды обновлено ✅')
@@ -794,10 +811,25 @@ export function TournamentAdminForm({
           parent_b_match_id: null,
         }
 
-    const { error } = await supabase.from('matches').insert(row)
-    if (error) {
-      setMsg(error.message)
+    const { data: inserted, error: insErr } = await supabase
+      .from('matches')
+      .insert(row)
+      .select('*')
+      .single()
+    if (insErr) {
+      setMsg(
+        `${insErr.message} Если написано «permission denied» — выполните в Supabase SQL миграцию supabase/migrations/20260425120000_matches_grants.sql.`
+      )
       return
+    }
+    if (inserted) {
+      setMatches((prev) => {
+        const list = [...prev, inserted as Match]
+        return list.sort(
+          (a, b) =>
+            a.round_index - b.round_index || a.bracket_order - b.bracket_order
+        )
+      })
     }
     setAddA('')
     setAddA2('')

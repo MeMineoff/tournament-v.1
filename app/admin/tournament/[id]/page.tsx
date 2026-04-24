@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+
+export const dynamic = 'force-dynamic'
 import { normalizeParticipantIds } from '@/lib/participantIds'
 import { supabase } from '@/lib/supabaseClient'
 import { fetchTournamentTeams } from '@/lib/tournamentTeams'

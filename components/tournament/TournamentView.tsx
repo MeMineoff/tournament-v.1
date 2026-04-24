@@ -12,6 +12,10 @@ import {
 } from '@/lib/stats'
 import { MatchModal } from '@/components/tournament/MatchModal'
 import { PlayoffBracket } from '@/components/tournament/PlayoffBracket'
+import {
+  chunkPairsFromParticipantIds,
+  computeDoublesTeamRoundRobinStandings,
+} from '@/lib/doublesTeamStandings'
 import { isDoublesParticipantType } from '@/lib/participantType'
 import type { TournamentArchiveStats } from '@/lib/aggregateStats'
 import { TournamentStatsBlock } from '@/components/tournament/TournamentStatsBlock'
@@ -87,6 +91,28 @@ export default function TournamentView({
     for (const r of funRows) m.set(r.id, r.funSum)
     return m
   }, [funRows])
+
+  const doublesPairs = useMemo(
+    () => chunkPairsFromParticipantIds(tournament.participant_ids),
+    [tournament.participant_ids]
+  )
+
+  const useDoublesTeamTable =
+    !isPlayoffFormat &&
+    isDoublesParticipantType(tournament.participant_type) &&
+    doublesPairs.length > 0
+
+  const teamStandingsRR = useMemo(
+    () =>
+      useDoublesTeamTable
+        ? computeDoublesTeamRoundRobinStandings(
+            scopePlayers,
+            standingsMatches,
+            doublesPairs
+          )
+        : [],
+    [useDoublesTeamTable, scopePlayers, standingsMatches, doublesPairs]
+  )
 
   const formatBlock = formatBlockLabel(tournament)
   const typeLabel = isDoublesParticipantType(tournament.participant_type)
@@ -334,12 +360,29 @@ export default function TournamentView({
 
       {tab === 'table' && !isPlayoffFormat && (
         <section role="tabpanel" aria-label="Турнирная таблица">
+          {typeLabel === 'Пары' && doublesPairs.length === 0 && (
+            <p className="mb-3 text-sm text-[var(--ink-muted)]">
+              Чтобы таблица шла <strong>по парам</strong>, в составе турнира должно быть{' '}
+              <strong>чётное</strong> число участников; в админке список id задаёт пары{' '}
+              <strong>по два подряд</strong> (1-й и 2-й = первая пара, 3-й и 4-й = вторая…).
+              Сейчас показана персональная таблица.
+            </p>
+          )}
+          {useDoublesTeamTable && teamStandingsRR.length > 0 && (
+            <p className="mb-3 text-sm text-[var(--ink-muted)]">
+              Таблица по <strong>парам</strong>: в составе турнира два id подряд = одна команда. Очки
+              и матчи — на команду, не на каждого игрока отдельно. FUN ★ в столбце — сумма пары
+              (оба в этом турнире).
+            </p>
+          )}
           <div className="overflow-hidden rounded-2xl border-2 border-[var(--ink)] bg-[var(--surface)] shadow-[6px_6px_0_var(--ink)]">
             <table className="w-full text-left text-sm">
               <thead className="bg-[var(--surface-2)] text-[var(--ink)]">
                 <tr>
                   <th className="px-4 py-3 font-black">#</th>
-                  <th className="px-4 py-3 font-black">Игрок</th>
+                  <th className="px-4 py-3 font-black">
+                    {useDoublesTeamTable && teamStandingsRR.length > 0 ? 'Пара' : 'Игрок'}
+                  </th>
                   <th className="px-4 py-3 font-black">Матчи</th>
                   <th className="px-4 py-3 font-black">Победы</th>
                   <th className="px-4 py-3 font-black">Очки</th>
@@ -347,7 +390,55 @@ export default function TournamentView({
                 </tr>
               </thead>
               <tbody>
-                {standings.map((row, idx) => (
+                {useDoublesTeamTable && teamStandingsRR.length > 0
+                  ? teamStandingsRR.map((row, idx) => {
+                      const funSum =
+                        (funSumByPlayerId.get(row.playerA.id) ?? 0) +
+                        (funSumByPlayerId.get(row.playerB.id) ?? 0)
+                      return (
+                        <tr
+                          key={`${row.playerA.id}-${row.playerB.id}`}
+                          className="border-t-2 border-[var(--ink)] odd:bg-[var(--cream)]/40"
+                        >
+                          <td className="px-4 py-3 font-mono font-bold">
+                            {idx + 1}
+                          </td>
+                          <td className="px-4 py-3 font-bold">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              <Link
+                                href={`/player/${row.playerA.id}`}
+                                className="inline-flex min-w-0 items-center transition hover:underline"
+                              >
+                                <span className="mr-2 text-xl">
+                                  {row.playerA.avatar_emoji}
+                                </span>
+                                <span className="truncate">{row.playerA.name}</span>
+                              </Link>
+                              <Link
+                                href={`/player/${row.playerB.id}`}
+                                className="inline-flex min-w-0 items-center text-[var(--ink-muted)] transition hover:underline"
+                              >
+                                <span className="mr-2 text-lg">
+                                  {row.playerB.avatar_emoji}
+                                </span>
+                                <span className="truncate text-sm">
+                                  {row.playerB.name}
+                                </span>
+                              </Link>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">{row.played}</td>
+                          <td className="px-4 py-3">{row.wins}</td>
+                          <td className="px-4 py-3 font-mono font-black text-[var(--clay)]">
+                            {row.points}
+                          </td>
+                          <td className="px-4 py-3 font-mono font-bold tabular-nums">
+                            {funSum}★
+                          </td>
+                        </tr>
+                      )
+                    })
+                  : standings.map((row, idx) => (
                   <tr
                     key={row.id}
                     className="border-t-2 border-[var(--ink)] odd:bg-[var(--cream)]/40"

@@ -707,6 +707,15 @@ export function TournamentAdminForm({
   async function addRoundRobinMatch(e: React.FormEvent) {
     e.preventDefault()
     setMsg(null)
+    console.log('Добавляем матч...', {
+      tournamentId: tournament.id,
+      format: tournament.format,
+      doubles,
+      addA,
+      addB,
+      addTeamA,
+      addTeamB,
+    })
     if (tournament.format !== 'round_robin') {
       setMsg('Добавить матч круга можно только у турнира в формате «круг». Для плей-офф используйте сетку и кнопки заполнения выше.')
       return
@@ -1259,7 +1268,13 @@ export function TournamentAdminForm({
         {tournament.format === 'round_robin' && (
           <div className="mb-8 space-y-4">
             <h3 className="text-lg font-black">Добавить матч (круг)</h3>
-            <form onSubmit={(e) => void addRoundRobinMatch(e)} className="grid gap-3 sm:grid-cols-2">
+            <form
+              onSubmit={(e) => {
+                console.log('Submit формы "Добавить матч (круг)"')
+                void addRoundRobinMatch(e)
+              }}
+              className="grid gap-3 sm:grid-cols-2"
+            >
               {doubles ? (
                 <>
                   <label className="text-sm font-bold">
@@ -1355,6 +1370,9 @@ export function TournamentAdminForm({
               <div className="sm:col-span-full">
                 <button
                   type="submit"
+                  onClick={() => {
+                    console.log('Клик по кнопке "Добавить матч"')
+                  }}
                   disabled={doubles && teamsOrdered.length < 2}
                   className="rounded-full border-2 border-[var(--ink)] bg-[var(--lime)] px-6 py-2.5 text-sm font-black shadow-[3px_3px_0_var(--ink)]"
                 >

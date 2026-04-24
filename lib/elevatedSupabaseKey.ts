@@ -1,4 +1,7 @@
+import { getFetchWithRetry } from '@/lib/fetchWithRetry'
 import { TOURNAMENT_DB_SCHEMA } from '@/lib/supabaseClient'
+
+const fetchWithRetry = getFetchWithRetry()
 
 /**
  * Секрет для серверных операций (аналог service_role, обходит RLS):
@@ -45,7 +48,7 @@ async function postMatchesRest(
   if (includeAuthorizationBearer) {
     headers.Authorization = `Bearer ${key}`
   }
-  const res = await fetch(url, { method: 'POST', headers, body })
+  const res = await fetchWithRetry(url, { method: 'POST', headers, body })
   const text = await res.text()
   return { res, text }
 }

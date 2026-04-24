@@ -92,8 +92,10 @@ export default async function Home() {
           Ошибка загрузки: {supabaseErrorMessage(error)}
         </p>
         <p className="mt-4 max-w-2xl text-sm font-semibold text-[var(--ink-muted)]">
-          Чаще всего: VPN/прокси, антивирус, DNS или IPv6. URL и anon key — в панели Supabase
-          → Project Settings → API, файл .env.local в корне проекта.
+          Чаще всего: обрыв до Supabase (VPN, Wi‑Fi, антивирус, DNS, IPv6). Клиент в проекте
+          делает до 4 повторов запроса. Проверьте URL в браузере и .env.local (Supabase →
+          Project Settings → API). Dev: в package.json для `dev` уже задан устойчивый DNS
+          (ipv4first).
         </p>
       </div>
     )

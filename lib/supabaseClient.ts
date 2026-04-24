@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { getFetchWithRetry } from '@/lib/fetchWithRetry'
 
 /** Вся схема API Tennis Fun Cup — в `tournament` (таблицы groups, players, …). */
 export const TOURNAMENT_DB_SCHEMA = 'tournament' as const
@@ -12,10 +13,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
+const fetchWithRetry = getFetchWithRetry()
+
 /**
  * `db.schema` задаёт `schema` у PostgREST-клиента (Accept-Profile/Content-Profile на уровне билдера).
  * Дополнительно вешаем те же Profile в `global.headers`, чтобы и GET/POST шли в `tournament`, даже если
  * в части бандлов (RSC/клиент) настройка `db` ведёт себя иначе — иначе PostgREST ищет таблицы в `public`.
+ * `global.fetch` — ретраи на обрывах (terminated / ECONNRESET) локально и на слабом канале.
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   db: {
@@ -25,6 +29,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: false
   },
   global: {
+    fetch: fetchWithRetry,
     headers: {
       'apikey': supabaseAnonKey,
       'Accept-Profile': TOURNAMENT_DB_SCHEMA,

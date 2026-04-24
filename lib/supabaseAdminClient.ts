@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { getFetchWithRetry } from '@/lib/fetchWithRetry'
 import { getElevatedSupabaseKey } from '@/lib/elevatedSupabaseKey'
 import {
   supabase,
@@ -28,6 +29,7 @@ export function getSupabaseAdminForServer(): AppSupabaseClient {
     db: { schema: TOURNAMENT_DB_SCHEMA },
     auth: { persistSession: false, autoRefreshToken: false },
     global: {
+      fetch: getFetchWithRetry(),
       headers: {
         apikey: serviceKey,
         'Accept-Profile': TOURNAMENT_DB_SCHEMA,

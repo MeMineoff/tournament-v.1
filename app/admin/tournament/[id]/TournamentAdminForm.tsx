@@ -70,6 +70,10 @@ export function TournamentAdminForm({
   const [addA2, setAddA2] = useState<number | ''>('')
   const [addB, setAddB] = useState<number | ''>('')
   const [addB2, setAddB2] = useState<number | ''>('')
+  const [addTeamA, setAddTeamA] = useState<number | ''>('')
+  const [addTeamB, setAddTeamB] = useState<number | ''>('')
+  const [fillTeamA, setFillTeamA] = useState<number | ''>('')
+  const [fillTeamB, setFillTeamB] = useState<number | ''>('')
   const [newTeamP1, setNewTeamP1] = useState<number | ''>('')
   const [newTeamP2, setNewTeamP2] = useState<number | ''>('')
   const [teamActionBusy, setTeamActionBusy] = useState(false)
@@ -127,6 +131,11 @@ export function TournamentAdminForm({
     () => [...teams].sort((a, b) => a.sort_index - b.sort_index),
     [teams]
   )
+  const teamById = useMemo(() => {
+    const m = new Map<number, Team>()
+    for (const t of teamsOrdered) m.set(Number(t.id), t)
+    return m
+  }, [teamsOrdered])
 
   const playoffR1FromTeamsError = useMemo(() => {
     if (!doubles || tournament.format !== 'playoff') return null
@@ -136,6 +145,11 @@ export function TournamentAdminForm({
   useEffect(() => {
     setTeams(initialTeams)
   }, [initialTeams])
+
+  useEffect(() => {
+    if (!doubles) return
+    syncFillTeamsToPlayers(fillTeamA, fillTeamB)
+  }, [doubles, fillTeamA, fillTeamB, teamById])
 
   const playoffBusyElsewhere = useMemo(() => {
     if (tournament.format !== 'playoff' || fillMatchId === '') {
@@ -165,6 +179,13 @@ export function TournamentAdminForm({
     setFA2(m.player_a2_id ?? '')
     setFB(m.player_b_id ?? '')
     setFB2(m.player_b2_id ?? '')
+    if (doubles) {
+      setFillTeamA(teamIdForPair(m.player_a_id ?? null, m.player_a2_id ?? null))
+      setFillTeamB(teamIdForPair(m.player_b_id ?? null, m.player_b2_id ?? null))
+    } else {
+      setFillTeamA('')
+      setFillTeamB('')
+    }
     setFScoreA(Number(m.score_a ?? 0))
     setFScoreB(Number(m.score_b ?? 0))
     setFCompleted(m.status === 'completed')
@@ -198,6 +219,32 @@ export function TournamentAdminForm({
     const b = playerById.get(p2)
     if (!a || !b) return `${p1} + ${p2}`
     return `${a.avatar_emoji} ${a.name} · ${b.avatar_emoji} ${b.name}`
+  }
+
+  function teamIdForPair(p1: number | null, p2: number | null): number | '' {
+    if (p1 == null || p2 == null) return ''
+    const found = teamsOrdered.find(
+      (t) =>
+        (Number(t.player_1_id) === Number(p1) && Number(t.player_2_id) === Number(p2)) ||
+        (Number(t.player_1_id) === Number(p2) && Number(t.player_2_id) === Number(p1))
+    )
+    return found ? Number(found.id) : ''
+  }
+
+  function syncFillTeamsToPlayers(teamA: number | '', teamB: number | '') {
+    const ta = teamA === '' ? undefined : teamById.get(Number(teamA))
+    const tb = teamB === '' ? undefined : teamById.get(Number(teamB))
+    if (!ta || !tb) {
+      setFA('')
+      setFA2('')
+      setFB('')
+      setFB2('')
+      return
+    }
+    setFA(Number(ta.player_1_id))
+    setFA2(Number(ta.player_2_id))
+    setFB(Number(tb.player_1_id))
+    setFB2(Number(tb.player_2_id))
   }
 
   async function addTournamentTeam(e: React.FormEvent) {
@@ -349,15 +396,34 @@ export function TournamentAdminForm({
   async function updateParticipantIds(next: number[]) {
     setSavingPid(true)
     setMsg(null)
-    const { error } = await supabase
-      .from('tournaments')
-      .update({ participant_ids: next })
-      .eq('id', tournament.id)
-    setSavingPid(false)
-    if (error) {
-      setMsg(error.message)
+    try {
+      const res = await fetch('/api/admin/tournaments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tournamentId: tournament.id,
+          participantIds: next,
+        }),
+      })
+      const payload = (await res.json().catch(() => null)) as
+        | { ok: true; tournament: { participant_ids?: unknown } }
+        | { ok: false; error?: string }
+        | null
+      if (!res.ok || !payload || payload.ok !== true) {
+        setSavingPid(false)
+        setMsg(
+          payload && 'error' in payload && payload.error
+            ? payload.error
+            : `Не удалось обновить состав турнира (HTTP ${res.status}).`
+        )
+        return
+      }
+    } catch (e: unknown) {
+      setSavingPid(false)
+      setMsg(e instanceof Error ? e.message : 'Не удалось обновить состав турнира.')
       return
     }
+    setSavingPid(false)
     await refreshAll()
     setMsg('Состав турнира обновлён ✅')
   }
@@ -389,17 +455,31 @@ export function TournamentAdminForm({
       return
     }
     if (doubles) {
-      if (fA === '' || fA2 === '' || fB === '' || fB2 === '') {
-        setRosterFormErr('Укажите четырёх игроков.')
+      if (fillTeamA === '' || fillTeamB === '') {
+        setRosterFormErr('Выберите две команды.')
         return
       }
-      const v = validateDoublesMatchRoster(Number(fA), Number(fA2), Number(fB), Number(fB2))
+      if (fillTeamA === fillTeamB) {
+        setRosterFormErr('Команда A и B должны быть разными.')
+        return
+      }
+      const ta = teamById.get(Number(fillTeamA))
+      const tb = teamById.get(Number(fillTeamB))
+      if (!ta || !tb) {
+        setRosterFormErr('Одна из выбранных команд не найдена. Обновите страницу.')
+        return
+      }
+      const a1 = Number(ta.player_1_id)
+      const a2 = Number(ta.player_2_id)
+      const b1 = Number(tb.player_1_id)
+      const b2 = Number(tb.player_2_id)
+      const v = validateDoublesMatchRoster(a1, a2, b1, b2)
       if (v) {
         setRosterFormErr(v)
         return
       }
       const err = assertAllParticipantsInTournament(
-        [Number(fA), Number(fA2), Number(fB), Number(fB2)],
+        [a1, a2, b1, b2],
         pids
       )
       if (err) {
@@ -409,7 +489,7 @@ export function TournamentAdminForm({
       const clash = assertNoPlayoffSameRoundPlayerReuse(
         tournament,
         curMatch,
-        [Number(fA), Number(fA2), Number(fB), Number(fB2)],
+        [a1, a2, b1, b2],
         matches
       )
       if (clash) {
@@ -419,10 +499,10 @@ export function TournamentAdminForm({
       const { error } = await supabase
         .from('matches')
         .update({
-          player_a_id: Number(fA),
-          player_a2_id: Number(fA2),
-          player_b_id: Number(fB),
-          player_b2_id: Number(fB2),
+          player_a_id: a1,
+          player_a2_id: a2,
+          player_b_id: b1,
+          player_b2_id: b2,
           score_a: Number(fScoreA),
           score_b: Number(fScoreB),
           status: fCompleted ? 'completed' : 'scheduled',
@@ -479,6 +559,8 @@ export function TournamentAdminForm({
     setFA2('')
     setFB('')
     setFB2('')
+    setFillTeamA('')
+    setFillTeamB('')
     setFScoreA(0)
     setFScoreB(0)
     setFCompleted(false)
@@ -495,29 +577,47 @@ export function TournamentAdminForm({
     setMsg(null)
     if (tournament.format !== 'round_robin') return
     const pids = normalizeParticipantIds(tournament.participant_ids)
+    let doublesRowTeams:
+      | { a1: number; a2: number; b1: number; b2: number }
+      | null = null
     if (doubles) {
-      if (addA === '' || addA2 === '' || addB === '' || addB2 === '') {
-        setMsg('Укажите четырёх игроков.')
+      if (addTeamA === '' || addTeamB === '') {
+        setMsg('Выберите две команды.')
         return
       }
+      if (addTeamA === addTeamB) {
+        setMsg('Команда A и B должны быть разными.')
+        return
+      }
+      const ta = teamById.get(Number(addTeamA))
+      const tb = teamById.get(Number(addTeamB))
+      if (!ta || !tb) {
+        setMsg('Одна из выбранных команд не найдена. Обновите страницу.')
+        return
+      }
+      const a1 = Number(ta.player_1_id)
+      const a2 = Number(ta.player_2_id)
+      const b1 = Number(tb.player_1_id)
+      const b2 = Number(tb.player_2_id)
       const v = validateDoublesMatchRoster(
-        Number(addA),
-        Number(addA2),
-        Number(addB),
-        Number(addB2)
+        a1,
+        a2,
+        b1,
+        b2
       )
       if (v) {
         setMsg(v)
         return
       }
       const err = assertAllParticipantsInTournament(
-        [Number(addA), Number(addA2), Number(addB), Number(addB2)],
+        [a1, a2, b1, b2],
         pids
       )
       if (err) {
         setMsg(err)
         return
       }
+      doublesRowTeams = { a1, a2, b1, b2 }
     } else {
       if (addA === '' || addB === '') {
         setMsg('Укажите двух игроков.')
@@ -550,10 +650,10 @@ export function TournamentAdminForm({
     const row = doubles
       ? {
           tournament_id: tournament.id,
-          player_a_id: Number(addA),
-          player_a2_id: Number(addA2),
-          player_b_id: Number(addB),
-          player_b2_id: Number(addB2),
+          player_a_id: Number(doublesRowTeams!.a1),
+          player_a2_id: Number(doublesRowTeams!.a2),
+          player_b_id: Number(doublesRowTeams!.b1),
+          player_b2_id: Number(doublesRowTeams!.b2),
           score_a: 0,
           score_b: 0,
           status: 'scheduled',
@@ -588,6 +688,8 @@ export function TournamentAdminForm({
     setAddA2('')
     setAddB('')
     setAddB2('')
+    setAddTeamA('')
+    setAddTeamB('')
     setMsg('Матч добавлен ✅')
     await refreshAll()
   }
@@ -901,93 +1003,102 @@ export function TournamentAdminForm({
           <div className="mb-8 space-y-4">
             <h3 className="text-lg font-black">Добавить матч (круг)</h3>
             <form onSubmit={(e) => void addRoundRobinMatch(e)} className="grid gap-3 sm:grid-cols-2">
-              <label className="text-sm font-bold">
-                {doubles ? 'Команда A — игрок 1' : 'Игрок A'}
-                <select
-                  value={addA}
-                  onChange={(e) => setAddA(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
-                >
-                  <option value="">—</option>
-                  {rosterPlayers.map((p) => (
-                    <option
-                      key={p.id}
-                      value={String(p.id)}
-                      disabled={optionTaken(Number(p.id), addA, [addA2, addB, addB2])}
+              {doubles ? (
+                <>
+                  <label className="text-sm font-bold">
+                    Команда A
+                    <select
+                      value={addTeamA === '' ? '' : String(addTeamA)}
+                      onChange={(e) =>
+                        setAddTeamA(e.target.value === '' ? '' : Number(e.target.value))
+                      }
+                      className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
                     >
-                      {p.avatar_emoji} {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {doubles && (
-                <label className="text-sm font-bold">
-                  Команда A — игрок 2
-                  <select
-                    value={addA2}
-                    onChange={(e) =>
-                      setAddA2(e.target.value === '' ? '' : Number(e.target.value))
-                    }
-                    className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
-                  >
-                    <option value="">—</option>
-                    {rosterPlayers.map((p) => (
-                      <option
-                        key={p.id}
-                        value={String(p.id)}
-                        disabled={optionTaken(Number(p.id), addA2, [addA, addB, addB2])}
-                      >
-                        {p.avatar_emoji} {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                      <option value="">—</option>
+                      {teamsOrdered.map((t) => (
+                        <option
+                          key={t.id}
+                          value={String(t.id)}
+                          disabled={optionTaken(Number(t.id), addTeamA, [addTeamB])}
+                        >
+                          {labelTeamPair(t.player_1_id, t.player_2_id)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-sm font-bold">
+                    Команда B
+                    <select
+                      value={addTeamB === '' ? '' : String(addTeamB)}
+                      onChange={(e) =>
+                        setAddTeamB(e.target.value === '' ? '' : Number(e.target.value))
+                      }
+                      className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
+                    >
+                      <option value="">—</option>
+                      {teamsOrdered.map((t) => (
+                        <option
+                          key={t.id}
+                          value={String(t.id)}
+                          disabled={optionTaken(Number(t.id), addTeamB, [addTeamA])}
+                        >
+                          {labelTeamPair(t.player_1_id, t.player_2_id)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="text-sm font-bold">
+                    Игрок A
+                    <select
+                      value={addA}
+                      onChange={(e) => setAddA(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
+                    >
+                      <option value="">—</option>
+                      {rosterPlayers.map((p) => (
+                        <option
+                          key={p.id}
+                          value={String(p.id)}
+                          disabled={optionTaken(Number(p.id), addA, [addB])}
+                        >
+                          {p.avatar_emoji} {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-sm font-bold">
+                    Игрок B
+                    <select
+                      value={addB}
+                      onChange={(e) => setAddB(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
+                    >
+                      <option value="">—</option>
+                      {rosterPlayers.map((p) => (
+                        <option
+                          key={p.id}
+                          value={String(p.id)}
+                          disabled={optionTaken(Number(p.id), addB, [addA])}
+                        >
+                          {p.avatar_emoji} {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               )}
-              <label className="text-sm font-bold">
-                {doubles ? 'Команда B — игрок 1' : 'Игрок B'}
-                <select
-                  value={addB}
-                  onChange={(e) => setAddB(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
-                >
-                  <option value="">—</option>
-                  {rosterPlayers.map((p) => (
-                    <option
-                      key={p.id}
-                      value={String(p.id)}
-                      disabled={optionTaken(Number(p.id), addB, [addA, addA2, addB2])}
-                    >
-                      {p.avatar_emoji} {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {doubles && (
-                <label className="text-sm font-bold">
-                  Команда B — игрок 2
-                  <select
-                    value={addB2}
-                    onChange={(e) =>
-                      setAddB2(e.target.value === '' ? '' : Number(e.target.value))
-                    }
-                    className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
-                  >
-                    <option value="">—</option>
-                    {rosterPlayers.map((p) => (
-                      <option
-                        key={p.id}
-                        value={String(p.id)}
-                        disabled={optionTaken(Number(p.id), addB2, [addA, addA2, addB])}
-                      >
-                        {p.avatar_emoji} {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              {doubles && teamsOrdered.length < 2 && (
+                <p className="sm:col-span-full text-xs text-[var(--ink-muted)]">
+                  Сначала добавьте минимум 2 команды в блоке «Пары (команды) турнира».
+                </p>
               )}
               <div className="sm:col-span-full">
                 <button
                   type="submit"
+                  disabled={doubles && teamsOrdered.length < 2}
                   className="rounded-full border-2 border-[var(--ink)] bg-[var(--lime)] px-6 py-2.5 text-sm font-black shadow-[3px_3px_0_var(--ink)]"
                 >
                   Добавить матч
@@ -1121,117 +1232,120 @@ export function TournamentAdminForm({
               </p>
             )}
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs font-bold">
-                {doubles ? 'A — игрок 1' : 'Игрок A'}
-                <select
-                  value={fA === '' ? '' : String(fA)}
-                  onChange={(e) => setFA(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="mt-1 w-full cursor-pointer rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
-                >
-                  <option value="">—</option>
-                  {rosterPlayers.map((p) => (
-                    <option
-                      key={p.id}
-                      value={String(p.id)}
-                      disabled={
-                        optionTaken(Number(p.id), fA, [fA2, fB, fB2]) ||
-                        isPlayoffPlayerDisabledInSelect(
-                          playoffBusyElsewhere,
-                          fA,
-                          Number(p.id)
-                        )
+              {doubles ? (
+                <>
+                  <label className="text-xs font-bold">
+                    Команда A
+                    <select
+                      value={fillTeamA === '' ? '' : String(fillTeamA)}
+                      onChange={(e) =>
+                        setFillTeamA(e.target.value === '' ? '' : Number(e.target.value))
                       }
+                      className="mt-1 w-full cursor-pointer rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
                     >
-                      {p.avatar_emoji} {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {doubles && (
-                <label className="text-xs font-bold">
-                  A — игрок 2
-                  <select
-                    value={fA2 === '' ? '' : String(fA2)}
-                    onChange={(e) =>
-                      setFA2(e.target.value === '' ? '' : Number(e.target.value))
-                    }
-                    className="mt-1 w-full cursor-pointer rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
-                  >
-                    <option value="">—</option>
-                    {rosterPlayers.map((p) => (
-                      <option
-                        key={p.id}
-                        value={String(p.id)}
-                        disabled={
-                          optionTaken(Number(p.id), fA2, [fA, fB, fB2]) ||
-                          isPlayoffPlayerDisabledInSelect(
-                            playoffBusyElsewhere,
-                            fA2,
-                            Number(p.id)
-                          )
-                        }
-                      >
-                        {p.avatar_emoji} {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className="text-xs font-bold">
-                {doubles ? 'B — игрок 1' : 'Игрок B'}
-                <select
-                  value={fB === '' ? '' : String(fB)}
-                  onChange={(e) => setFB(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="mt-1 w-full cursor-pointer rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
-                >
-                  <option value="">—</option>
-                  {rosterPlayers.map((p) => (
-                    <option
-                      key={p.id}
-                      value={String(p.id)}
-                      disabled={
-                        optionTaken(Number(p.id), fB, [fA, fA2, fB2]) ||
-                        isPlayoffPlayerDisabledInSelect(
-                          playoffBusyElsewhere,
-                          fB,
-                          Number(p.id)
+                      <option value="">—</option>
+                      {teamsOrdered.map((t) => {
+                        const busy =
+                          playoffBusyElsewhere.has(Number(t.player_1_id)) ||
+                          playoffBusyElsewhere.has(Number(t.player_2_id))
+                        return (
+                          <option
+                            key={t.id}
+                            value={String(t.id)}
+                            disabled={
+                              optionTaken(Number(t.id), fillTeamA, [fillTeamB]) || busy
+                            }
+                          >
+                            {labelTeamPair(t.player_1_id, t.player_2_id)}
+                          </option>
                         )
+                      })}
+                    </select>
+                  </label>
+                  <label className="text-xs font-bold">
+                    Команда B
+                    <select
+                      value={fillTeamB === '' ? '' : String(fillTeamB)}
+                      onChange={(e) =>
+                        setFillTeamB(e.target.value === '' ? '' : Number(e.target.value))
                       }
+                      className="mt-1 w-full cursor-pointer rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
                     >
-                      {p.avatar_emoji} {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {doubles && (
-                <label className="text-xs font-bold">
-                  B — игрок 2
-                  <select
-                    value={fB2 === '' ? '' : String(fB2)}
-                    onChange={(e) =>
-                      setFB2(e.target.value === '' ? '' : Number(e.target.value))
-                    }
-                    className="mt-1 w-full cursor-pointer rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
-                  >
-                    <option value="">—</option>
-                    {rosterPlayers.map((p) => (
-                      <option
-                        key={p.id}
-                        value={String(p.id)}
-                        disabled={
-                          optionTaken(Number(p.id), fB2, [fA, fA2, fB]) ||
-                          isPlayoffPlayerDisabledInSelect(
-                            playoffBusyElsewhere,
-                            fB2,
-                            Number(p.id)
-                          )
-                        }
-                      >
-                        {p.avatar_emoji} {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                      <option value="">—</option>
+                      {teamsOrdered.map((t) => {
+                        const busy =
+                          playoffBusyElsewhere.has(Number(t.player_1_id)) ||
+                          playoffBusyElsewhere.has(Number(t.player_2_id))
+                        return (
+                          <option
+                            key={t.id}
+                            value={String(t.id)}
+                            disabled={
+                              optionTaken(Number(t.id), fillTeamB, [fillTeamA]) || busy
+                            }
+                          >
+                            {labelTeamPair(t.player_1_id, t.player_2_id)}
+                          </option>
+                        )
+                      })}
+                    </select>
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="text-xs font-bold">
+                    Игрок A
+                    <select
+                      value={fA === '' ? '' : String(fA)}
+                      onChange={(e) => setFA(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="mt-1 w-full cursor-pointer rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
+                    >
+                      <option value="">—</option>
+                      {rosterPlayers.map((p) => (
+                        <option
+                          key={p.id}
+                          value={String(p.id)}
+                          disabled={
+                            optionTaken(Number(p.id), fA, [fB]) ||
+                            isPlayoffPlayerDisabledInSelect(
+                              playoffBusyElsewhere,
+                              fA,
+                              Number(p.id)
+                            )
+                          }
+                        >
+                          {p.avatar_emoji} {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-bold">
+                    Игрок B
+                    <select
+                      value={fB === '' ? '' : String(fB)}
+                      onChange={(e) => setFB(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="mt-1 w-full cursor-pointer rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
+                    >
+                      <option value="">—</option>
+                      {rosterPlayers.map((p) => (
+                        <option
+                          key={p.id}
+                          value={String(p.id)}
+                          disabled={
+                            optionTaken(Number(p.id), fB, [fA]) ||
+                            isPlayoffPlayerDisabledInSelect(
+                              playoffBusyElsewhere,
+                              fB,
+                              Number(p.id)
+                            )
+                          }
+                        >
+                          {p.avatar_emoji} {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               )}
               <label className="text-xs font-bold">
                 Счёт A
@@ -1279,6 +1393,8 @@ export function TournamentAdminForm({
                   setFA2('')
                   setFB('')
                   setFB2('')
+                  setFillTeamA('')
+                  setFillTeamB('')
                   setFScoreA(0)
                   setFScoreB(0)
                   setFCompleted(false)

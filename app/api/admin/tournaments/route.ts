@@ -15,6 +15,11 @@ type CreateTournamentBody = {
   playoffBracketSize?: 4 | 8 | 16
 }
 
+type UpdateParticipantsBody = {
+  tournamentId?: number
+  participantIds?: number[]
+}
+
 function badRequest(message: string) {
   return NextResponse.json({ ok: false, error: message }, { status: 400 })
 }
@@ -116,4 +121,44 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ ok: false, error: err }, { status: 500 })
   }
   return NextResponse.json({ ok: true })
+}
+
+export async function PATCH(req: Request) {
+  let body: UpdateParticipantsBody
+  try {
+    body = (await req.json()) as UpdateParticipantsBody
+  } catch {
+    return badRequest('Некорректный JSON.')
+  }
+
+  const tournamentId = Number(body.tournamentId)
+  const rawIds = Array.isArray(body.participantIds) ? body.participantIds : null
+  if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+    return badRequest('Некорректный id турнира.')
+  }
+  if (!rawIds) {
+    return badRequest('participantIds должен быть массивом.')
+  }
+  const participantIds = rawIds
+    .map((x) => Number(x))
+    .filter((x) => Number.isFinite(x) && x > 0)
+  if (participantIds.length !== rawIds.length) {
+    return badRequest('В participantIds должны быть только числовые id > 0.')
+  }
+
+  const { data, error } = await supabase
+    .from('tournaments')
+    .update({ participant_ids: participantIds })
+    .eq('id', tournamentId)
+    .select('id, participant_ids')
+    .single()
+
+  if (error || !data) {
+    return NextResponse.json(
+      { ok: false, error: error?.message ?? 'Не удалось обновить состав турнира.' },
+      { status: 500 }
+    )
+  }
+
+  return NextResponse.json({ ok: true, tournament: data })
 }

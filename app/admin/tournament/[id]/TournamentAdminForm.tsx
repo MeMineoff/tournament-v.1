@@ -74,6 +74,7 @@ export function TournamentAdminForm({
   const [addA2, setAddA2] = useState<number | ''>('')
   const [addB, setAddB] = useState<number | ''>('')
   const [addB2, setAddB2] = useState<number | ''>('')
+  const [addRoundIndex, setAddRoundIndex] = useState(1)
   const [addTeamA, setAddTeamA] = useState<number | ''>('')
   const [addTeamB, setAddTeamB] = useState<number | ''>('')
   const [fillTeamA, setFillTeamA] = useState<number | ''>('')
@@ -192,6 +193,17 @@ export function TournamentAdminForm({
     [matches]
   )
   const rrList = useMemo(() => matches.filter(isRoundRobinMatch), [matches])
+  const duplicateRoundRobinMatch = useMemo(() => {
+    if (doubles || addA === '' || addB === '') return null
+    const a = Number(addA)
+    const b = Number(addB)
+    return rrList.find((m) => {
+      if (Number(m.round_index ?? 0) !== Number(addRoundIndex)) return false
+      const ma = Number(m.player_a_id ?? -1)
+      const mb = Number(m.player_b_id ?? -1)
+      return (ma === a && mb === b) || (ma === b && mb === a)
+    }) ?? null
+  }, [doubles, addA, addB, addRoundIndex, rrList])
 
   function optionTaken(
     optionId: number,
@@ -263,6 +275,12 @@ export function TournamentAdminForm({
     const b = playerById.get(p2)
     if (!a || !b) return base
     return `${base} · ${a.avatar_emoji} ${a.name} + ${b.avatar_emoji} ${b.name}`
+  }
+
+  function labelSinglePlayer(id: number | null | undefined): string {
+    if (id == null) return '—'
+    const p = playerById.get(Number(id))
+    return p ? `${p.avatar_emoji} ${p.name}` : `id ${id}`
   }
 
   function teamIdForPair(p1: number | null, p2: number | null): number | '' {
@@ -707,17 +725,13 @@ export function TournamentAdminForm({
   async function addRoundRobinMatch(e: React.FormEvent) {
     e.preventDefault()
     setMsg(null)
-    console.log('Добавляем матч...', {
-      tournamentId: tournament.id,
-      format: tournament.format,
-      doubles,
-      addA,
-      addB,
-      addTeamA,
-      addTeamB,
-    })
     if (tournament.format !== 'round_robin') {
       setMsg('Добавить матч круга можно только у турнира в формате «круг». Для плей-офф используйте сетку и кнопки заполнения выше.')
+      return
+    }
+    const roundIndex = Number(addRoundIndex)
+    if (!Number.isInteger(roundIndex) || roundIndex < 1 || roundIndex > 10) {
+      setMsg('Номер круга должен быть целым числом от 1 до 10.')
       return
     }
     const pids = participantIdsOrdered
@@ -776,6 +790,10 @@ export function TournamentAdminForm({
         setMsg(err)
         return
       }
+      if (duplicateRoundRobinMatch) {
+        setMsg('Игроки уже встречались в этом круге.')
+        return
+      }
     }
 
     // Не блокируем добавление матча сетевой ошибкой чтения Supabase с клиента
@@ -796,7 +814,7 @@ export function TournamentAdminForm({
           score_b: 0,
           status: 'scheduled',
           round: 'round_robin',
-          round_index: 0,
+          round_index: roundIndex,
           bracket_order: maxBo + 1,
           parent_a_match_id: null,
           parent_b_match_id: null,
@@ -811,7 +829,7 @@ export function TournamentAdminForm({
           score_b: 0,
           status: 'scheduled',
           round: 'round_robin',
-          round_index: 0,
+          round_index: roundIndex,
           bracket_order: maxBo + 1,
           parent_a_match_id: null,
           parent_b_match_id: null,
@@ -1263,13 +1281,91 @@ export function TournamentAdminForm({
         {tournament.format === 'round_robin' && (
           <div className="mb-8 space-y-4">
             <h3 className="text-lg font-black">Добавить матч (круг)</h3>
+            <h4 className="text-base font-black">Уже добавленные матчи</h4>
+            {rrList.length === 0 ? (
+              <p className="text-sm text-[var(--ink-muted)]">Матчей ещё нет.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border-2 border-[var(--ink)]">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-[var(--surface-2)]">
+                    <tr>
+                      <th className="px-3 py-2 font-black">Круг</th>
+                      <th className="px-3 py-2 font-black">Игрок A</th>
+                      <th className="px-3 py-2 font-black">Игрок B</th>
+                      <th className="px-3 py-2 font-black">Счёт</th>
+                      <th className="px-3 py-2 font-black text-right">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rrList.map((m) => (
+                      <tr key={m.id} className="border-t border-[var(--ink)]">
+                        <td className="px-3 py-2 font-mono text-xs">{Number(m.round_index ?? 0)}</td>
+                        <td className="px-3 py-2">
+                          {doubles
+                            ? labelTeamPair(
+                                Number(m.player_a_id ?? 0),
+                                Number(m.player_a2_id ?? 0),
+                                teamById.get(Number(teamIdForPair(m.player_a_id, m.player_a2_id)))?.name
+                              )
+                            : labelSinglePlayer(m.player_a_id)}
+                        </td>
+                        <td className="px-3 py-2">
+                          {doubles
+                            ? labelTeamPair(
+                                Number(m.player_b_id ?? 0),
+                                Number(m.player_b2_id ?? 0),
+                                teamById.get(Number(teamIdForPair(m.player_b_id, m.player_b2_id)))?.name
+                              )
+                            : labelSinglePlayer(m.player_b_id)}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs">
+                          {Number(m.score_a ?? 0)}:{Number(m.score_b ?? 0)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openFill(m)}
+                              className="rounded-lg border-2 border-[var(--ink)] px-2 py-1 text-xs font-bold"
+                            >
+                              Редактировать
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void deleteMatch(m.id)}
+                              className="rounded-lg border border-[var(--clay)] bg-[var(--clay-soft)] px-2 py-1 text-xs font-bold"
+                            >
+                              Удалить
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <h4 className="text-base font-black">Добавить матч (круг)</h4>
             <form
               onSubmit={(e) => {
-                console.log('Submit формы "Добавить матч (круг)"')
                 void addRoundRobinMatch(e)
               }}
               className="grid gap-3 sm:grid-cols-2"
             >
+              <label className="text-sm font-bold">
+                Номер круга
+                <select
+                  value={String(addRoundIndex)}
+                  onChange={(e) => setAddRoundIndex(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border-2 border-[var(--ink)] bg-[var(--cream)] px-2 py-2"
+                >
+                  {Array.from({ length: 10 }, (_, idx) => idx + 1).map((n) => (
+                    <option key={n} value={String(n)}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {doubles ? (
                 <>
                   <label className="text-sm font-bold">
@@ -1362,64 +1458,21 @@ export function TournamentAdminForm({
                   Сначала добавьте минимум 2 команды в блоке «Пары (команды) турнира».
                 </p>
               )}
+              {!doubles && duplicateRoundRobinMatch && (
+                <p className="sm:col-span-full rounded-lg border-2 border-[var(--clay)] bg-[var(--clay-soft)] px-3 py-2 text-xs font-bold text-[var(--ink)]">
+                  Игроки уже встречались в этом круге.
+                </p>
+              )}
               <div className="sm:col-span-full">
                 <button
                   type="submit"
-                  onClick={() => {
-                    console.log('Клик по кнопке "Добавить матч"')
-                  }}
-                  disabled={doubles && teamsOrdered.length < 2}
+                  disabled={(doubles && teamsOrdered.length < 2) || (!doubles && Boolean(duplicateRoundRobinMatch))}
                   className="rounded-full border-2 border-[var(--ink)] bg-[var(--lime)] px-6 py-2.5 text-sm font-black shadow-[3px_3px_0_var(--ink)]"
                 >
                   Добавить матч
                 </button>
               </div>
             </form>
-
-            <h3 className="text-lg font-black">Матчи круга</h3>
-            {rrList.length === 0 ? (
-              <p className="text-sm text-[var(--ink-muted)]">Матчей ещё нет.</p>
-            ) : (
-              <ul className="space-y-2">
-                {rrList.map((m) => (
-                  <li
-                    key={m.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-[var(--ink)] px-3 py-2 text-sm"
-                  >
-                    <span className="font-mono text-xs">#{m.id}</span>
-                    <span>
-                      {doubles
-                        ? `${labelTeamPair(
-                            Number(m.player_a_id ?? 0),
-                            Number(m.player_a2_id ?? 0),
-                            teamById.get(Number(teamIdForPair(m.player_a_id, m.player_a2_id)))?.name
-                          )} vs ${labelTeamPair(
-                            Number(m.player_b_id ?? 0),
-                            Number(m.player_b2_id ?? 0),
-                            teamById.get(Number(teamIdForPair(m.player_b_id, m.player_b2_id)))?.name
-                          )}`
-                        : `${m.player_a_id ?? '—'} vs ${m.player_b_id ?? '—'}`}
-                    </span>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openFill(m)}
-                        className="rounded-lg border-2 border-[var(--ink)] px-2 py-1 text-xs font-bold"
-                      >
-                        Изменить
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void deleteMatch(m.id)}
-                        className="rounded-lg border border-[var(--clay)] bg-[var(--clay-soft)] px-2 py-1 text-xs font-bold"
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
         )}
 

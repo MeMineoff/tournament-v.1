@@ -235,7 +235,7 @@ export function TournamentAdminForm({
     const [
       { data: tr, error: trErr },
       { data: mr, error: mErr },
-      freshTeams,
+      { data: teamsRaw, error: teamsErr },
     ] = await Promise.all([
       supabase.from('tournaments').select('*').eq('id', tournament.id).single(),
       supabase
@@ -244,7 +244,11 @@ export function TournamentAdminForm({
         .eq('tournament_id', tournament.id)
         .order('round_index', { ascending: true })
         .order('bracket_order', { ascending: true }),
-      fetchTournamentTeams(supabase, tournament.id),
+      supabase
+        .from('teams')
+        .select('*')
+        .eq('tournament_id', tournament.id)
+        .order('sort_index', { ascending: true }),
     ])
     if (trErr) {
       setMsg(`Турнир: ${trErr.message}`)
@@ -262,7 +266,13 @@ export function TournamentAdminForm({
     } else if (mr) {
       setMatches(mr as Match[])
     }
-    setTeams(freshTeams)
+    if (teamsErr) {
+      setMsg(
+        `Список команд: ${teamsErr.message} (проверьте сеть и права на tournament.teams, см. supabase/migrations/20260424103000_teams_grants.sql).`
+      )
+    } else if (teamsRaw) {
+      setTeams((teamsRaw ?? []).map((r) => normalizeTeamRow(r as Record<string, unknown>)))
+    }
     router.refresh()
   }
 
@@ -1346,6 +1356,11 @@ export function TournamentAdminForm({
               </div>
             )}
             <h4 className="text-base font-black">Добавить матч (круг)</h4>
+            {doubles && (
+              <p className="text-xs text-[var(--ink-muted)]">
+                Команд в турнире: {teamsOrdered.length}
+              </p>
+            )}
             <form
               onSubmit={(e) => {
                 void addRoundRobinMatch(e)
@@ -1382,7 +1397,6 @@ export function TournamentAdminForm({
                         <option
                           key={t.id}
                           value={String(t.id)}
-                          disabled={optionTaken(Number(t.id), addTeamA, [addTeamB])}
                         >
                           {labelTeamPair(t.player_1_id, t.player_2_id, t.name)}
                         </option>
@@ -1403,7 +1417,6 @@ export function TournamentAdminForm({
                         <option
                           key={t.id}
                           value={String(t.id)}
-                          disabled={optionTaken(Number(t.id), addTeamB, [addTeamA])}
                         >
                           {labelTeamPair(t.player_1_id, t.player_2_id, t.name)}
                         </option>

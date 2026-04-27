@@ -276,6 +276,25 @@ export function TournamentAdminForm({
     router.refresh()
   }
 
+  async function refreshTeamsOnly() {
+    setTeamActionBusy(true)
+    const { data, error } = await supabase
+      .from('teams')
+      .select('*')
+      .eq('tournament_id', tournament.id)
+      .order('sort_index', { ascending: true })
+    setTeamActionBusy(false)
+    if (error) {
+      setMsg(
+        `Список команд: ${error.message} (проверьте сеть и права на tournament.teams, см. supabase/migrations/20260424103000_teams_grants.sql).`
+      )
+      return
+    }
+    const rows = (data ?? []).map((r) => normalizeTeamRow(r as Record<string, unknown>))
+    setTeams(rows)
+    setMsg(`Список команд обновлён: ${rows.length}.`)
+  }
+
   function labelTeamPair(p1: number, p2: number, name?: string | null) {
     const base = teamDisplayName(
       { player_1_id: p1, player_2_id: p2, name: name ?? null },
@@ -379,7 +398,13 @@ export function TournamentAdminForm({
     setNewTeamP1('')
     setNewTeamP2('')
     setNewTeamName('')
-    setMsg('Команда добавлена ✅')
+    setMsg(
+      `Команда добавлена ✅ #${created.id}: ${labelTeamPair(
+        created.player_1_id,
+        created.player_2_id,
+        created.name
+      )}`
+    )
     await refreshAll()
   }
 
@@ -1073,9 +1098,24 @@ export function TournamentAdminForm({
 
       {doubles && (
         <section className="rounded-2xl border-2 border-[var(--ink)] bg-[var(--surface)] p-6 shadow-[4px_4px_0_var(--ink)]">
-          <h2 className="mb-2 font-[family-name:var(--font-display)] text-xl font-bold">
-            Пары (команды) турнира
-          </h2>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">
+              Пары (команды) турнира
+            </h2>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border-2 border-[var(--ink)] bg-[var(--surface-2)] px-3 py-1 text-xs font-black">
+                Команд: {teamsOrdered.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => void refreshTeamsOnly()}
+                disabled={teamActionBusy}
+                className="rounded-full border-2 border-[var(--ink)] bg-[var(--surface)] px-3 py-1 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Обновить список
+              </button>
+            </div>
+          </div>
           <p className="mb-4 text-xs text-[var(--ink-muted)]">
             Список хранится в базе, привязан к этому турниру. Порядок важен: сначала идут пары
             с меньшим <span className="font-mono">sort_index</span> (как в таблице ниже). Для
@@ -1083,7 +1123,10 @@ export function TournamentAdminForm({
             пуст, пары в таблице строятся по составу: два id подряд в «участниках».
           </p>
           {teamsOrdered.length === 0 ? (
-            <p className="mb-3 text-sm text-[var(--ink-muted)]">Команд пока нет — добавьте первую снизу.</p>
+            <p className="mb-3 text-sm text-[var(--ink-muted)]">
+              Команд пока нет или список не загрузился из сети. Нажмите «Обновить список» и проверьте,
+              что после создания команда появилась в этом блоке.
+            </p>
           ) : (
             <ol className="mb-4 list-decimal space-y-2 pl-5 text-sm">
               {teamsOrdered.map((t) => (

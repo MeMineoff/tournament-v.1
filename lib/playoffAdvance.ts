@@ -1,3 +1,4 @@
+import type { AppSupabaseClient } from '@/lib/supabaseClient'
 import { supabase } from '@/lib/supabaseClient'
 import type { Match } from '@/lib/types'
 
@@ -35,9 +36,15 @@ function winningSide(m: Match): Side | null {
   return null
 }
 
-/** После завершения матча подставляет победителя (или пару) в следующий раунд сетки. */
-export async function propagatePlayoffWinner(completedMatchId: number) {
-  const { data: m, error: fe } = await supabase
+/**
+ * После завершения матча подставляет победителя (или пару) в следующий раунд сетки.
+ * Передайте admin-клиент на сервере, чтобы UPDATE дочерних матчей не упирался в RLS.
+ */
+export async function propagatePlayoffWinnerWithClient(
+  client: AppSupabaseClient,
+  completedMatchId: number
+) {
+  const { data: m, error: fe } = await client
     .from('matches')
     .select('*')
     .eq('id', completedMatchId)
@@ -50,7 +57,7 @@ export async function propagatePlayoffWinner(completedMatchId: number) {
 
   const mid = Number(completedMatchId)
 
-  const { data: children, error: ce } = await supabase
+  const { data: children, error: ce } = await client
     .from('matches')
     .select('id, parent_a_match_id, parent_b_match_id')
     .or(`parent_a_match_id.eq.${mid},parent_b_match_id.eq.${mid}`)
@@ -73,6 +80,11 @@ export async function propagatePlayoffWinner(completedMatchId: number) {
       patch.player_b2_id = side.id2
     }
     if (Object.keys(patch).length === 0) continue
-    await supabase.from('matches').update(patch).eq('id', ch.id)
+    await client.from('matches').update(patch).eq('id', ch.id)
   }
+}
+
+/** Клиентский вызов (браузер): при сбоях прав предпочтителен PATCH через API. */
+export async function propagatePlayoffWinner(completedMatchId: number) {
+  return propagatePlayoffWinnerWithClient(supabase, completedMatchId)
 }

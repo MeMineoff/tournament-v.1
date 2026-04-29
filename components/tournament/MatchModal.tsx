@@ -3,9 +3,8 @@
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { supabase } from '@/lib/supabaseClient'
 import type { Match, MatchEnriched, Player, Tournament } from '@/lib/types'
-import { propagatePlayoffWinner } from '@/lib/playoffAdvance'
+import { requestPatchMatch } from '@/lib/requestPatchMatch'
 import { validateDoublesMatchRoster } from '@/lib/doublesRoster'
 import { assertAllParticipantsInTournament } from '@/lib/participantGuards'
 import {
@@ -199,27 +198,27 @@ export function MatchModal({
     }
     setRosterSaving(true)
     setErr(null)
-    const { error } = await supabase
-      .from('matches')
-      .update(
-        doublesTournament
-          ? {
-              player_a_id: Number(roA),
-              player_a2_id: Number(roA2),
-              player_b_id: Number(roB),
-              player_b2_id: Number(roB2),
-            }
-          : {
-              player_a_id: Number(roA),
-              player_a2_id: null,
-              player_b_id: Number(roB),
-              player_b2_id: null,
-            }
-      )
-      .eq('id', match.id)
+    const patch = doublesTournament
+      ? {
+          player_a_id: Number(roA),
+          player_a2_id: Number(roA2),
+          player_b_id: Number(roB),
+          player_b2_id: Number(roB2),
+        }
+      : {
+          player_a_id: Number(roA),
+          player_a2_id: null,
+          player_b_id: Number(roB),
+          player_b2_id: null,
+        }
+    const rosterRes = await requestPatchMatch({
+      id: match.id,
+      tournamentId: tournament.id,
+      patch,
+    })
     setRosterSaving(false)
-    if (error) {
-      setErr(error.message)
+    if (!rosterRes.ok) {
+      setErr([rosterRes.error, rosterRes.hint].filter(Boolean).join(' · '))
       return
     }
     router.refresh()
@@ -250,15 +249,16 @@ export function MatchModal({
           fun_rating_a: funA,
           fun_rating_b: funB,
         }
-    const { error } = await supabase.from('matches').update(payload).eq('id', match.id)
+    const saveRes = await requestPatchMatch({
+      id: match.id,
+      tournamentId: tournament.id,
+      patch: payload,
+    })
 
     setSaving(false)
-    if (error) {
-      setErr(error.message)
+    if (!saveRes.ok) {
+      setErr([saveRes.error, saveRes.hint].filter(Boolean).join(' · '))
       return
-    }
-    if (canEditScore && matchCompleted) {
-      await propagatePlayoffWinner(match.id)
     }
     router.refresh()
     onClose()

@@ -463,7 +463,7 @@ export default function TournamentView({
         tournament={tournament}
         players={players}
         doublesTournament={isDoublesParticipantType(tournament.participant_type)}
-        canEditScore={false}
+        canEditScore={true}
         canAssignRoster={false}
         tournamentMatches={matches}
       />

@@ -18,37 +18,70 @@ type Props = {
   doublesBracket?: boolean
 }
 
-function sideALabel(m: MatchEnriched, doubles: boolean) {
+type SideLabel = {
+  line1: string
+  emoji: string
+  line2: string | null
+}
+
+/** Парный плей-офф: показываем название команды или «игрок1 / игрок2», не только первого. */
+function sideALabel(m: MatchEnriched, doubles: boolean): SideLabel {
   if (doubles && m.player_a_id == null && m.player_a2_id == null) {
-    return { line1: 'Команда не назначена', emoji: '⏳', line2: null as string | null }
+    return { line1: 'Команда не назначена', emoji: '⏳', line2: null }
   }
   if (!doubles && m.player_a_id == null) {
-    return { line1: 'Не назначено', emoji: '⏳', line2: null as string | null }
+    return { line1: 'Не назначено', emoji: '⏳', line2: null }
+  }
+  if (doubles) {
+    if (m.team_a_name) {
+      return { line1: m.team_a_name, emoji: m.player_a_emoji || '🎾', line2: null }
+    }
+    const a1 = (m.player_a_name || '').trim() || '—'
+    const a2 = (m.player_a2_name || '').trim()
+    if (a2) {
+      return {
+        line1: `${a1} / ${a2}`,
+        emoji: m.player_a_emoji || '🎾',
+        line2: null,
+      }
+    }
+    return { line1: a1, emoji: m.player_a_emoji || '❔', line2: null }
   }
   return {
-    line1: doubles ? m.team_a_name || m.player_a_name : m.player_a_name,
+    line1: m.player_a_name,
     emoji: m.player_a_emoji,
     line2:
-      doubles ? null : m.player_a2_id != null || m.player_a2_name
-        ? m.player_a2_name || '—'
-        : null,
+      m.player_a2_id != null || m.player_a2_name ? m.player_a2_name || '—' : null,
   }
 }
 
-function sideBLabel(m: MatchEnriched, doubles: boolean) {
+function sideBLabel(m: MatchEnriched, doubles: boolean): SideLabel {
   if (doubles && m.player_b_id == null && m.player_b2_id == null) {
-    return { line1: 'Команда не назначена', emoji: '⏳', line2: null as string | null }
+    return { line1: 'Команда не назначена', emoji: '⏳', line2: null }
   }
   if (!doubles && m.player_b_id == null) {
-    return { line1: 'Не назначено', emoji: '⏳', line2: null as string | null }
+    return { line1: 'Не назначено', emoji: '⏳', line2: null }
+  }
+  if (doubles) {
+    if (m.team_b_name) {
+      return { line1: m.team_b_name, emoji: m.player_b_emoji || '🎾', line2: null }
+    }
+    const b1 = (m.player_b_name || '').trim() || '—'
+    const b2 = (m.player_b2_name || '').trim()
+    if (b2) {
+      return {
+        line1: `${b1} / ${b2}`,
+        emoji: m.player_b_emoji || '🎾',
+        line2: null,
+      }
+    }
+    return { line1: b1, emoji: m.player_b_emoji || '❔', line2: null }
   }
   return {
-    line1: doubles ? m.team_b_name || m.player_b_name : m.player_b_name,
+    line1: m.player_b_name,
     emoji: m.player_b_emoji,
     line2:
-      doubles ? null : m.player_b2_id != null || m.player_b2_name
-        ? m.player_b2_name || '—'
-        : null,
+      m.player_b2_id != null || m.player_b2_name ? m.player_b2_name || '—' : null,
   }
 }
 

@@ -18,13 +18,13 @@ import { validateDoublesMatchRoster } from '@/lib/doublesRoster'
 import { normalizeParticipantIds } from '@/lib/participantIds'
 import { assertAllParticipantsInTournament } from '@/lib/participantGuards'
 import { isDoublesParticipantType } from '@/lib/participantType'
-import { propagatePlayoffWinner } from '@/lib/playoffAdvance'
 import {
   assertNoPlayoffSameRoundPlayerReuse,
   isPlayoffPlayerDisabledInSelect,
   playoffSameRoundBusyElsewhere,
 } from '@/lib/playoffRosterConflict'
 import { isPlayoffBracketMatch, isRoundRobinMatch } from '@/lib/stats'
+import { requestPatchMatch } from '@/lib/requestPatchMatch'
 
 const ROUND_LABEL: Record<string, string> = {
   round_robin: 'Круг',
@@ -539,9 +539,10 @@ export function TournamentAdminForm({
       const tA = sorted[2 * i]!
       const tB = sorted[2 * i + 1]!
       const m = leaf[i]!
-      const { error } = await supabase
-        .from('matches')
-        .update({
+      const patchRes = await requestPatchMatch({
+        id: m.id,
+        tournamentId: tournament.id,
+        patch: {
           player_a_id: tA.player_1_id,
           player_a2_id: tA.player_2_id,
           player_b_id: tB.player_1_id,
@@ -549,11 +550,11 @@ export function TournamentAdminForm({
           score_a: 0,
           score_b: 0,
           status: 'scheduled',
-        })
-        .eq('id', m.id)
-      if (error) {
+        },
+      })
+      if (!patchRes.ok) {
         setTeamActionBusy(false)
-        setMsg(error.message)
+        setMsg([patchRes.error, patchRes.hint].filter(Boolean).join(' · '))
         return
       }
     }
@@ -681,9 +682,10 @@ export function TournamentAdminForm({
         setRosterFormErr(clash)
         return
       }
-      const { error } = await supabase
-        .from('matches')
-        .update({
+      const patchRes = await requestPatchMatch({
+        id: Number(fillMatchId),
+        tournamentId: tournament.id,
+        patch: {
           player_a_id: a1,
           player_a2_id: a2,
           player_b_id: b1,
@@ -691,10 +693,10 @@ export function TournamentAdminForm({
           score_a: Number(fScoreA),
           score_b: Number(fScoreB),
           status: fCompleted ? 'completed' : 'scheduled',
-        })
-        .eq('id', fillMatchId)
-      if (error) {
-        setRosterFormErr(error.message)
+        },
+      })
+      if (!patchRes.ok) {
+        setRosterFormErr([patchRes.error, patchRes.hint].filter(Boolean).join(' · '))
         return
       }
     } else {
@@ -721,9 +723,10 @@ export function TournamentAdminForm({
         setRosterFormErr(clash)
         return
       }
-      const { error } = await supabase
-        .from('matches')
-        .update({
+      const patchRes = await requestPatchMatch({
+        id: Number(fillMatchId),
+        tournamentId: tournament.id,
+        patch: {
           player_a_id: Number(fA),
           player_a2_id: null,
           player_b_id: Number(fB),
@@ -731,14 +734,13 @@ export function TournamentAdminForm({
           score_a: Number(fScoreA),
           score_b: Number(fScoreB),
           status: fCompleted ? 'completed' : 'scheduled',
-        })
-        .eq('id', fillMatchId)
-      if (error) {
-        setRosterFormErr(error.message)
+        },
+      })
+      if (!patchRes.ok) {
+        setRosterFormErr([patchRes.error, patchRes.hint].filter(Boolean).join(' · '))
         return
       }
     }
-    const savedMatchId = fillMatchId
     setFillMatchId('')
     setFA('')
     setFA2('')
@@ -751,9 +753,6 @@ export function TournamentAdminForm({
     setFCompleted(false)
     setRosterFormErr(null)
     setMsg('Матч обновлён ✅')
-    if (tournament.format === 'playoff' && fCompleted) {
-      await propagatePlayoffWinner(Number(savedMatchId))
-    }
     await refreshAll()
   }
 
